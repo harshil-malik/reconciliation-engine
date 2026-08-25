@@ -165,6 +165,34 @@ git status                                # repo has NO commits yet
   API-key providers on this project; don't silently switch a default back to a
   hosted API.
 
+## PDF extraction — fixed after a live-run bug report
+
+A real run surfaced three defects the synthetic fixtures never hit. Root cause: the
+per-bank prompt was written for a *vision* model ("decide by the amount's horizontal
+position under the column headers") but `LocalPDFExtractor` feeds it
+`pypdf.extract_text()`, which flattens the table and destroys exactly the geometry
+the prompt depends on. The model then guessed.
+
+- Closing balances were reported as transaction amounts.
+- Wrapped narration lines became phantom transactions described by a bare number.
+- Ledger Dr/Cr came out essentially at random.
+
+Fixes: layout-mode extraction, prompts rewritten for text input (trailing number is
+the running balance; a line not starting with a date is a continuation), phantom-row
+filtering, and — most importantly — an **arithmetic audit**. Consecutive closing
+balances differ by exactly the transaction amount, so the balance column checks the
+model's debit/credit reading independently, and it works regardless of sign
+convention. Corroborated disagreements are corrected and logged; outright
+disagreements raise `PDFExtractionError` rather than publishing fiction.
+
+This caught a real misread on a live run (a deposit read as a withdrawal), which is
+the point: **do not trust the model's column reading — verify it arithmetically.**
+
+Separately, `amount = credit - debit` was applied to both a bank statement and the
+client's bank-account ledger, which are mirrored books. Templates now declare
+`debit_is_inflow`; `BankAccountLedgerTemplate` covers the mirrored case, and the UI
+spells both conventions out because choosing wrong inverts every amount silently.
+
 ## Open concerns to raise, not bury
 
 - **Stage 1 can match two unrelated transactions.** Observed live: a bank row

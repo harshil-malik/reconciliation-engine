@@ -31,14 +31,25 @@ def _is_phantom_row(raw_row: dict) -> bool:
     The common artifact is a wrapped narration line, or a stray table cell, being
     emitted as its own row — which surfaces as a "transaction" whose description is
     a bare number, or which carries no date at all.
+
+    A blank description alone is NOT disqualifying: real statements do contain rows
+    with an amount but no narration, and dropping those loses money from the
+    reconciliation. Such a row is only an artifact if it carries no figures either.
     """
+    if not str(raw_row.get("date") or "").strip():
+        return True
+
     description = str(raw_row.get("description") or "").strip()
-    if not description:
-        return True
     # A description that is only digits/separators/currency is a misread cell.
-    if re.fullmatch(r"[\d.,\s₹Rs]+", description, flags=re.IGNORECASE):
+    if description and re.fullmatch(r"[\d.,\s₹Rs]+", description, flags=re.IGNORECASE):
         return True
-    return not str(raw_row.get("date") or "").strip()
+
+    if description:
+        return False
+    has_figures = _parse_balance(raw_row.get("balance")) is not None or any(
+        to_decimal(raw_row.get(field) or 0) != 0 for field in ("debit", "credit")
+    )
+    return not has_figures
 
 
 def _parse_balance(value: object) -> Optional[Decimal]:
@@ -79,6 +90,18 @@ def _reconcile_against_balances(
 
         delta = current - previous
         if delta == amounts[i]:
+            continue
+
+        # No amount was printed in either money column, but the balance moved: the
+        # figure is missing from the source text (some statements omit it, and some
+        # PDFs simply do not render it), and the delta is the only record of what
+        # happened. Nothing contradicts it, so take it.
+        if amounts[i] == 0:
+            corrections.append(
+                f"row {i + 1} ({rows[i].get('date')} {str(rows[i].get('description'))[:30]!r}): "
+                f"no amount printed, recovered {delta} from the balance movement"
+            )
+            corrected[i] = delta
             continue
 
         seen = {
@@ -157,11 +180,16 @@ def parse_pdf(
         ).date()
         reference = raw_row.get("reference")
 
+        # Some statements print an amount with no narration at all. Marked
+        # explicitly rather than left blank so a CA reading the report can tell
+        # "the statement said nothing here" apart from "extraction lost the text".
+        description = str(raw_row.get("description") or "").strip() or "(no narration)"
+
         transactions.append(
             Transaction(
                 date=parsed_date,
                 amount=amount,
-                description=str(raw_row.get("description", "")).strip(),
+                description=description,
                 reference=str(reference).strip() if reference else None,
                 source=source,
                 file_name=resolved_name,

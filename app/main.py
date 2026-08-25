@@ -7,7 +7,7 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 # Loads the llama.cpp server URLs (LLAMA_SERVER_URL / LLAMA_EMBEDDING_SERVER_URL),
@@ -28,7 +28,7 @@ from app.ingestion.ledger_templates.generic_ledger import (
     BankAccountLedgerTemplate,
     GenericLedgerTemplate,
 )
-from app.ingestion.pdf_parser import parse_pdf
+from app.ingestion.pdf_parser import PDFExtractionError, parse_pdf
 from app.ingestion.vision_client import LocalPDFExtractor, VisionExtractor
 from app.matching.matcher import match
 from app.report.builder import build_report
@@ -69,6 +69,17 @@ def get_embedding_client() -> EmbeddingClient:
 
 def get_match_confirmer() -> MatchConfirmer:
     return LocalMatchConfirmer()
+
+
+@app.exception_handler(PDFExtractionError)
+async def _pdf_extraction_error_handler(request, exc: PDFExtractionError):
+    """Surface an unreadable statement as a 422, not a 500.
+
+    Nothing is broken server-side — the uploaded PDF could not be read reliably, and
+    the detail explains which row failed and why. Returning 500 both misreports whose
+    fault it is and hides that explanation behind a generic error in the UI.
+    """
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 @app.get("/health")

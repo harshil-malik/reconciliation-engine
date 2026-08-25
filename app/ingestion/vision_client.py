@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import base64
 import io
+import json
+import logging
 import os
 from typing import Protocol
 
+from app.ingestion.layout_table import parse_layout_table
 from app.local_llm import LlamaCppClient, LlamaCppServerError
+
+logger = logging.getLogger(__name__)
 
 
 class VisionExtractor(Protocol):
@@ -84,6 +89,17 @@ class LocalPDFExtractor:
                 "which is outside v1 scope. Re-export a text PDF from the bank "
                 "portal, or point get_vision_extractor() at a hosted vision model."
             )
+
+        # Try to read the table geometrically before asking the model anything.
+        # Where columns are aligned, which column a number sits in is a hard fact
+        # that code reads exactly, instantly and for free — whereas a 3B model
+        # guesses, and was observed reporting running balances as transaction
+        # amounts and putting every deposit in the withdrawal column. The model
+        # stays as the fallback for layouts this cannot parse.
+        rows = parse_layout_table(text)
+        if rows:
+            logger.info("Parsed %d rows from the PDF table layout, without the model", len(rows))
+            return json.dumps({"rows": rows})
 
         full_prompt = (
             f"{prompt}\n\n"

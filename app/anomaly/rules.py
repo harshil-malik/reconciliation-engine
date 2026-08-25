@@ -87,25 +87,40 @@ def detect_round_numbers(
     *,
     unit: Decimal,
     min_amount: Decimal,
+    max_prevalence: Decimal = Decimal("0.30"),
 ) -> list[AnomalyFlag]:
     """Amount is an exact multiple of `unit` and large enough to be notable — real
-    transaction amounts rarely land on a round number by chance."""
-    flags: list[AnomalyFlag] = []
-    for txn in transactions:
-        abs_amount = abs(txn.amount)
-        if abs_amount >= min_amount and abs_amount % unit == 0:
-            flags.append(
-                AnomalyFlag(
-                    rule="round_number_entry",
-                    transactions=[txn],
-                    reason=(
-                        f"Amount {abs_amount} is an exact multiple of {unit} — round-number "
-                        "entries can indicate a manual adjustment rather than a genuine "
-                        "transaction."
-                    ),
-                )
-            )
-    return flags
+    transaction amounts rarely land on a round number by chance.
+
+    Unless, for this client, they do. The rule is suppressed entirely when more than
+    `max_prevalence` of eligible transactions are round, because at that point
+    roundness is the client's normal payment behaviour rather than a signal. Without
+    that gate this fired on 48% of rows of a real statement — noise that buries the
+    anomalies a CA actually needs to see, which is the specific failure the spec
+    warns about.
+    """
+    candidates = [t for t in transactions if abs(t.amount) >= min_amount]
+    if not candidates:
+        return []
+
+    round_candidates = [t for t in candidates if abs(t.amount) % unit == 0]
+    prevalence = Decimal(len(round_candidates)) / Decimal(len(candidates))
+    if prevalence > max_prevalence:
+        return []
+
+    return [
+        AnomalyFlag(
+            rule="round_number_entry",
+            transactions=[txn],
+            reason=(
+                f"Amount {abs(txn.amount)} is an exact multiple of {unit}, which is "
+                f"unusual here ({prevalence:.0%} of comparable entries are round) — "
+                "round-number entries can indicate a manual adjustment rather than a "
+                "genuine transaction."
+            ),
+        )
+        for txn in round_candidates
+    ]
 
 
 def detect_reversed_mirrored(

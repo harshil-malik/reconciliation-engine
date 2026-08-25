@@ -80,15 +80,30 @@ def test_threshold_avoidance_ignores_amount_at_or_above_threshold() -> None:
     assert flags == []
 
 
-def test_round_number_flagged_above_minimum() -> None:
-    txn = _txn(amount="20000", day=1)
+def test_round_number_flagged_when_it_stands_out() -> None:
+    """One round amount among ragged ones is the signal the rule is looking for."""
+    round_txn = _txn(amount="20000", day=1)
+    others = [_txn(amount=amount, day=2) for amount in ("13457", "28931", "17264")]
 
     flags = detect_round_numbers(
-        [txn], unit=Decimal("1000"), min_amount=Decimal("10000")
+        [round_txn, *others], unit=Decimal("1000"), min_amount=Decimal("10000")
     )
 
     assert len(flags) == 1
     assert flags[0].rule == "round_number_entry"
+    assert flags[0].transactions[0].id == round_txn.id
+
+
+def test_round_number_stays_silent_when_round_amounts_are_the_norm() -> None:
+    """If most of the book is round, roundness is this client's normal payment
+    behaviour, not an anomaly — flagging it all buries the real findings."""
+    txns = [_txn(amount=amount, day=1) for amount in ("20000", "45000", "12000", "13457")]
+
+    flags = detect_round_numbers(
+        [*txns], unit=Decimal("1000"), min_amount=Decimal("10000")
+    )
+
+    assert flags == []
 
 
 def test_round_number_ignores_non_round_amount() -> None:

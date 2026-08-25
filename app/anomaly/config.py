@@ -27,6 +27,14 @@ class AnomalyConfig(BaseModel):
     round_number_unit: Decimal = Decimal("1000")
     round_number_min_amount: Decimal = Decimal("10000")
 
+    # A round number is only suspicious if round numbers are UNUSUAL in this book.
+    # Plenty of businesses pay round amounts as a matter of course — rent, salaries,
+    # transfers — and on a real statement this rule fired on 48% of rows, which tells
+    # a CA nothing and buries the flags that matter. When more than this share of
+    # eligible transactions are round, the pattern is this client's normal and the
+    # rule stays silent.
+    round_number_max_prevalence: Decimal = Decimal("0.30")
+
     # reversed_mirrored_entry: a +X and a -X transaction within this many days of each
     # other, in the same source, are treated as a possible reversal pair.
     mirrored_window_days: int = 3

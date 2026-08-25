@@ -56,6 +56,7 @@ def detect_anomalies(
         all_txns,
         unit=config.round_number_unit,
         min_amount=config.round_number_min_amount,
+        max_prevalence=config.round_number_max_prevalence,
     )
 
     return AnomalyResult(flags=flags)

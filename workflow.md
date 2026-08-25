@@ -1,143 +1,158 @@
-# Workflow — from here onwards
+# Workflow — testing against a real bank statement
 
-Working plan for finishing the llama.cpp / Qwen offline migration and hardening the
-reconciliation engine. Written 2026-08-25.
+The plan. `PROGRESS.md` holds the current state.
 
-**Naming note:** you asked for a file named `workfow`; assumed that was a typo and
-used `workflow.md` so it renders as Markdown. Rename if you actually meant the former.
+**Next session:** a real (redacted) HDFC statement and the matching client ledger
+arrive. That is the one thing that will tell us whether any of this generalizes —
+everything so far is synthetic plus two sample PDFs, and both of those turned out to
+contradict themselves.
 
 ---
 
-## Where things stand
+## Before touching the real file
 
-| Item | Status |
+```bash
+cd ~/v-01
+source .venv/bin/activate && python -m pytest -q      # expect 114 passed
+llama-server -m models/qwen2.5-3b-instruct-q4_k_m.gguf --port 8080 -c 8192 &
+llama-server -m models/Qwen3-Embedding-0.6B-Q8_0.gguf --port 8081 --embeddings &
+python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \
+                                        sample_data/internal_ledger.pdf
+```
+
+The fixture must still pass all four checks. If it doesn't, fix that first — a
+known-good baseline is what makes the real file's failures interpretable.
+
+**Handle the real file carefully.** It is client financial data even when redacted:
+keep it out of git (add its directory to `.gitignore` before copying it in), and do
+not paste its contents anywhere. Everything runs locally, so nothing leaves the
+machine on its own — keep it that way.
+
+## Step 1 — Look at the text layer before running anything
+
+Do not start with `/reconcile`. Start by seeing what the extractor sees:
+
+```bash
+python -c "
+from pypdf import PdfReader
+t=''.join(p.extract_text(extraction_mode='layout') or '' for p in PdfReader('REAL.pdf').pages)
+for i,l in enumerate([x.rstrip() for x in t.split(chr(10))][:40]): print(f'{i:3d}|{l}')
+"
+```
+
+What to look for, and what each means:
+
+| Observation | Implication |
 | --- | --- |
-| Stage 0–3 pipeline + report export | Done, 82 tests passing |
-| Stage 2 graceful degradation (API failure no longer 500s the request) | Done, verified live |
-| llama.cpp integration (local Qwen as default, no API keys) | Code complete, tested against mocked transport |
-| llama.cpp installed (Homebrew build 10566) | Done |
-| GGUF weights downloaded | Done, both verified byte-exact |
-| Live verification against the real Qwen model | Done — embeddings, confirmer, and end-to-end all exercised live |
-| Confirmer quality measured (`scripts/eval_confirmer.py`) | Done — 6/8 recall, **zero false positives** |
+| Empty / no text | Scanned PDF. Out of scope — needs OCR or a hosted vision model. Stop here. |
+| Columns visibly aligned | Good. The deterministic table parser should handle it. |
+| Columns collapsed into one stream | Layout mode failed. The model fallback will run and will probably be unreliable. |
+| Header repeated mid-document | Page breaks — check the parser doesn't emit header rows as transactions. |
+| Multi-line narrations | Check they attach to the row above rather than becoming phantom rows. |
+| No running-balance column | **Significant.** The balance audit cannot run, so the strongest safety net is gone and amounts rest on column position alone. |
 
-The migration is functionally complete and running offline with no API key. See
-`PROGRESS.md` for what the live tuning found and the honest assessment of the 3B
-model — it is usable but marginal, and prompt changes must be re-measured with the
-eval script rather than eyeballed.
-
----
-
-## Step 1 — Weights download ✅ DONE
-
-Both GGUFs are in `models/` (gitignored) and verified byte-exact against the
-HuggingFace `content-length`, with valid `GGUF` magic:
-
-- `qwen2.5-3b-instruct-q4_k_m.gguf` — 2,104,932,768 bytes
-- `Qwen3-Embedding-0.6B-Q8_0.gguf` — 639,150,592 bytes
-
-If a file is ever lost, re-run the `curl -C -` commands from README.md — resume works
-(HF returns `206` with `accept-ranges: bytes`). Do **not** go back to
-`llama-server -hf`: that path stalled silently (dead socket, still ESTABLISHED, no
-error, no timeout).
-
-**Cleanup owed:** the abandoned `-hf` attempt left ~725 MB orphaned.
+## Step 2 — Extract, and check the rows against the printed page
 
 ```bash
-rm -rf ~/.cache/huggingface/hub/models--Qwen--Qwen2.5-3B-Instruct-GGUF \
-       ~/.cache/huggingface/hub/models--Qwen--Qwen3-Embedding-0.6B-GGUF
+python -c "
+from app.ingestion.pdf_parser import parse_pdf
+from app.ingestion.bank_templates.hdfc import HDFCBankTemplate
+from app.ingestion.vision_client import LocalPDFExtractor
+for t in parse_pdf('REAL.pdf', source='bank', template=HDFCBankTemplate(), extractor=LocalPDFExtractor()):
+    print(f'{t.date} {t.amount:>14} {str(t.reference or \"\"):14s} {t.description[:50]}')
+"
 ```
 
-## Step 2 — Start both servers
+Read the terminal output as carefully as the rows:
+
+- `Parsed N rows from the PDF table layout, without the model` — the deterministic
+  path handled it. Best case.
+- `Corrected N amount(s) ... against the running balance` — the audit caught
+  misreads. Worth reading each one: a few is normal, many means the column geometry
+  is being misread and the template needs work.
+- `prints no opening balance, so the first row ... rests on its column position` —
+  check row 1 by hand.
+- `PDFExtractionError` — extraction refused rather than publishing wrong figures.
+  The message names the offending row; compare it against the statement.
+
+Then **spot-check against the actual PDF**: first row, last row, the largest amount,
+any row with an unusual layout. Confirm the count matches the statement's own
+transaction count.
+
+## Step 3 — Reconcile, then verify arithmetically
 
 ```bash
-llama-server -m models/qwen2.5-3b-instruct-q4_k_m.gguf --port 8080 -c 8192
-llama-server -m models/Qwen3-Embedding-0.6B-Q8_0.gguf --port 8081 --embeddings
+python scripts/verify_reconciliation.py REAL_BANK.pdf REAL_LEDGER.pdf
 ```
 
-Confirm both are actually serving before moving on — the health endpoint does not
-bind until weights finish loading:
+This is the objective test — it doesn't require trusting the engine:
 
-```bash
-curl -s localhost:8080/health && curl -s localhost:8081/health
-```
+1. **Self-consistency** — do the printed figures agree with the file's own running
+   balance? Failure here is the *document's* problem, not the engine's.
+2. **Completeness** — every transaction accounted for exactly once.
+3. **Reconciliation identity** — is every rupee of difference attributable to a named
+   item? This is the check a CA applies to a BRS.
+4. **Matched-pair sanity.**
 
-## Step 3 — Verify each model call in isolation
+Failures in 2–4 point at the engine. A failure in 1 points at the file.
 
-Test the three integration points separately, so a failure localizes cleanly. This
-is the whole point of the staged design — don't debug them as one blob.
+## Step 4 — Read the report like a reviewer
 
-1. **Embeddings** — `POST localhost:8081/v1/embeddings` returns a vector of the
-   expected dimension, and `LocalEmbeddingClient.embed()` returns one vector per input
-   in request order.
-2. **Match confirmation** — hand `LocalMatchConfirmer` a pair that should match and a
-   pair that clearly should not. Confirm the grammar constraint holds (valid JSON
-   every time) and that the two cases actually differ in `is_match`.
-3. **PDF extraction** — run `LocalPDFExtractor` against a real text-based bank
-   statement PDF and check the extracted rows against the printed page.
+Open the workbook and go to the **Matched** tab's `corroboration` column first:
 
-## Step 4 — End-to-end `/reconcile` against the real model
+- `reference` — strongest, a shared cheque/UTR/voucher number.
+- `description` — payees correspond.
+- `amount_and_date_only` — **review these**. Nothing but the figures links them, so
+  this is where two unrelated same-size same-day payments would be paired.
 
-```bash
-uvicorn app.main:app --reload   # then use the UI at localhost:8000
-```
+Then check **Unmatched** — on a real reconciliation these should be explainable
+(uncleared cheques, bank charges not yet booked, timing differences). If genuine
+matches are sitting there, that is a recall problem worth diagnosing.
 
-Use a fixture where Stage 1 *cannot* resolve everything (differing amounts or a wide
-date gap), so Stage 2 genuinely fires. Check the report's **AI Matched** tab: the
-reasoning strings must be specific and correct, not plausible-sounding filler.
+Then **Anomalies** — if it floods, the thresholds need calibrating for this client
+rather than the rule being wrong. `AnomalyConfig` holds them.
 
-## Steps 2–4 — ✅ DONE
+## Step 5 — Expect the HDFC template to need work, and fix it narrowly
 
-Servers start from local GGUFs, all three integration points verified live, and
-`/reconcile` returns a report with Stage 2 firing. Details and the four tuning
-findings are in `PROGRESS.md`.
+Real statements have layouts synthetic ones don't: page headers repeating,
+continuation markers, "B/F" and "C/F" lines, multi-currency columns, footers between
+transaction blocks.
 
-## Step 5 — Judge whether the 3B model is good enough — PARTLY DONE
+Fix in this order of preference:
 
-First pass done: `scripts/eval_confirmer.py` measures 15 labelled pairs against the
-live model — **6/8 recall, zero false positives** at the tuned default threshold
-of 0.5. Run it after any prompt, model, or threshold change.
+1. **The deterministic parser** (`app/ingestion/layout_table.py`) — column detection,
+   row filtering, continuation handling. Best returns, no model involved.
+2. **The HDFC template** (`app/ingestion/bank_templates/hdfc.py`) — only affects the
+   model fallback path.
+3. **Only then** consider the model.
 
-**Still owed:** those 15 cases are synthetic constructions, not real statements. To
-actually close this question, assemble ~20–30 known-answer pairs from real client
-data and re-measure:
+Add a regression test for each real-world quirk found, using the actual text layout
+(anonymized) as the fixture. That is how the template stops regressing.
 
-- **False positives** — pairs the model matched that aren't the same transaction.
-  These are the dangerous ones: a wrong match silently hides a real discrepancy.
-- **False negatives** — real matches it missed. Merely wasteful; they land in the CA
-  queue for manual review, which is the pre-existing status quo.
+## Then — the standing gap list
 
-Tune `confidence_threshold` in `match_with_ai()` accordingly. Bias toward strictness:
-Stage 1 already handles the bulk deterministically, so Stage 2 being conservative
-costs little, while a confident wrong match costs trust.
+Roughly in order of value:
 
-If false positives stay high even at a high threshold, the honest conclusion is that
-3B is undersized for the judgment task — escalate to a 7B/8B local model before
-reaching for a hosted API, since offline operation is the point.
+- **More bank templates.** Four of the five target banks are missing. Add one at a
+  time, validated against a real statement each, per the spec.
+- **Scanned PDF support.** Needs OCR or a hosted vision extractor. Currently refused
+  with a clear error, which is a defensible v1 position.
+- **Wire `AnomalyConfig` to the API** so thresholds can be set per client.
+- **Stage 3's AI layer** — specced, never built. Rules only today. Keep it strictly
+  separate from Stage 2 matching, per the spec's explicit design rule.
+- **Auth, rate limiting, upload size caps** — before this is exposed to anyone else.
+- **Convention auto-detection for CSV/Excel ledgers** (PDF only today).
+- **Re-run `scripts/eval_confirmer.py` with real pairs** once there are known-answer
+  matches from actual statements. The current 15 cases are my own constructions.
 
----
+## Rules of engagement, learned the hard way
 
-## Known gaps — decide, don't drift
-
-- **Scanned PDFs are unsupported.** A text-only local model cannot read them; the
-  extractor raises a clear error. Needs either a hosted vision model or a local
-  OCR/vision step. Currently out of v1 scope, which is a defensible call.
-- **Only one bank template exists (HDFC).** Spec targets the top 5 Indian banks. Add
-  them one at a time, validating each against real statements — not generically.
-- **Stage 3 anomaly AI layer was never built.** Rules-only today. The spec calls for
-  AI on fuzzier judgment calls, layered *on top of* rules and kept strictly separate
-  from Stage 2 matching.
-- **No auth, no rate limiting, no upload size cap** on the FastAPI app. Fine for
-  local single-user use; must be addressed before this is exposed to anyone else.
-- **Anomaly thresholds are unvalidated defaults.** `AnomalyConfig` values were chosen
-  as reasonable starting points, not calibrated against real engagements. The
-  round-number rule in particular looks prone to over-firing — every salary payment
-  trips it — which erodes CA trust exactly as the spec warns.
-- **`AnomalyConfig` is not wired to the API.** It exists but `/reconcile` always uses
-  defaults; there's no way for a CA to adjust thresholds per client.
-
-## Not yet under version control
-
-The repo has no commits. Worth an initial commit before further changes, so the
-llama.cpp migration is a reviewable diff rather than an undifferentiated starting
-state. `.gitignore` already excludes `.env`, `.venv/`, `models/`, and `*.gguf` —
-verify with `git status` that no weights or secrets are staged before committing.
+- **Deterministic beats model, every time.** Each thing moved out of the model made
+  the system better. Reach for code first.
+- **Measure thresholds; never guess.** Pick the middle of a plateau, and record the
+  measurement in a comment next to the value.
+- **Fail loudly.** A wrong number in a financial report is worse than no report.
+- **Re-run `scripts/eval_confirmer.py` after any confirmer prompt change.** It has
+  swung from 0 to 4 false positives on a plausible-looking edit.
+- **Verify against the source document, not the Excel output.** Several bugs looked
+  fine in the report and were only visible in the terminal or the PDF.

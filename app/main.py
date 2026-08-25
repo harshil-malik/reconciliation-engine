@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -33,6 +34,19 @@ from app.ingestion.vision_client import LocalPDFExtractor, VisionExtractor
 from app.matching.matcher import match
 from app.report.builder import build_report
 from app.schema import Transaction
+
+logger = logging.getLogger(__name__)
+
+# uvicorn owns the root logger and leaves it at WARNING, so the pipeline's INFO
+# diagnostics — which file each side was parsed from, rows recovered from balance
+# movements — would never reach the terminal. They are the first thing anyone needs
+# when a report looks wrong, so the app's own loggers are wired up explicitly.
+_app_logger = logging.getLogger("app")
+if not _app_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)-7s %(message)s"))
+    _app_logger.addHandler(_handler)
+_app_logger.setLevel(logging.INFO)
 
 app = FastAPI(title="Reconciliation Engine")
 
@@ -71,6 +85,37 @@ def get_match_confirmer() -> MatchConfirmer:
     return LocalMatchConfirmer()
 
 
+def _log_ingestion(
+    bank_txns: list[Transaction], ledger_txns: list[Transaction]
+) -> None:
+    """Prove the two sides were parsed from genuinely different files.
+
+    Cheap insurance against a whole class of silent failure: if the same upload were
+    ever read twice, or one parse fell back to the other's data, every downstream tab
+    would still look plausible while being nonsense. Logged on every run so the
+    evidence is in the terminal rather than requiring a debugging session.
+    """
+    bank_files = {t.file_name for t in bank_txns}
+    ledger_files = {t.file_name for t in ledger_txns}
+
+    logger.info(
+        "Stage 0: bank %d rows from %s | ledger %d rows from %s",
+        len(bank_txns), sorted(bank_files), len(ledger_txns), sorted(ledger_files),
+    )
+    for label, txns in (("bank", bank_txns), ("ledger", ledger_txns)):
+        for txn in txns[:3]:
+            logger.info(
+                "  %-6s %s %12s %r", label, txn.date, txn.amount, txn.description[:44]
+            )
+
+    if bank_files & ledger_files:
+        logger.error(
+            "SAME FILE ON BOTH SIDES: %s — the bank statement and the ledger were "
+            "parsed from the same upload, so this reconciliation is meaningless",
+            sorted(bank_files & ledger_files),
+        )
+
+
 @app.exception_handler(PDFExtractionError)
 async def _pdf_extraction_error_handler(request, exc: PDFExtractionError):
     """Surface an unreadable statement as a 422, not a 500.
@@ -103,15 +148,40 @@ _TEMPLATE_REGISTRIES: dict[Literal["bank", "ledger"], dict[str, BankPDFTemplate]
 }
 
 
+async def _read_upload(file: UploadFile) -> bytes:
+    return await file.read()
+
+
+def _reject_identical_uploads(bank_bytes: bytes, ledger_bytes: bytes) -> None:
+    """Refuse to reconcile a file against itself.
+
+    Every row then matches its own twin, so the report comes back with a full
+    Matched tab and an empty Unmatched tab — the most reassuring possible output,
+    and complete nonsense. It is an easy slip to make in a two-box upload form, and
+    nothing downstream can detect it, so it is caught here rather than presented as
+    a clean reconciliation.
+    """
+    if bank_bytes == ledger_bytes:
+        raise HTTPException(
+            422,
+            "The bank statement and the ledger are the same file. Reconciling a file "
+            "against itself matches every row with itself and produces an empty "
+            "Unmatched tab, which looks like a perfect result but means nothing. "
+            "Upload the bank statement in one box and the ledger in the other.",
+        )
+
+
 async def _parse_upload(
     file: UploadFile,
     *,
     source: Literal["bank", "ledger"],
     pdf_template: str | None,
     vision_extractor: VisionExtractor,
+    contents: bytes | None = None,
 ) -> list[Transaction]:
     suffix = Path(file.filename or "").suffix.lower()
-    contents = await file.read()
+    if contents is None:
+        contents = await file.read()
     registry = _TEMPLATE_REGISTRIES[source]
 
     with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
@@ -168,12 +238,25 @@ async def reconcile(
     anomaly detection across the full reconciled set (Stage 3), then export the
     audit-ready report as a downloadable .xlsx workbook.
     """
+    bank_bytes = await _read_upload(bank_file)
+    ledger_bytes = await _read_upload(ledger_file)
+    _reject_identical_uploads(bank_bytes, ledger_bytes)
+
     bank_txns = await _parse_upload(
-        bank_file, source="bank", pdf_template=bank_pdf_template, vision_extractor=vision_extractor
+        bank_file,
+        source="bank",
+        pdf_template=bank_pdf_template,
+        vision_extractor=vision_extractor,
+        contents=bank_bytes,
     )
     ledger_txns = await _parse_upload(
-        ledger_file, source="ledger", pdf_template=ledger_pdf_template, vision_extractor=vision_extractor
+        ledger_file,
+        source="ledger",
+        pdf_template=ledger_pdf_template,
+        vision_extractor=vision_extractor,
+        contents=ledger_bytes,
     )
+    _log_ingestion(bank_txns, ledger_txns)
 
     match_result = match(bank_txns, ledger_txns)
     ai_result = match_with_ai(

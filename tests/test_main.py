@@ -182,3 +182,23 @@ def test_reconcile_accepts_pdf_ledger_with_generic_ledger_template() -> None:
     sheets = pd.read_excel(io.BytesIO(response.content), sheet_name=None)
     assert len(sheets["Matched"]) == 1
     assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_same_date"
+
+
+def test_reconcile_rejects_the_same_file_on_both_sides() -> None:
+    """Reconciling a file against itself matches every row with its own twin and
+    empties the Unmatched tab — the most reassuring possible output, and nonsense."""
+    csv_bytes = (
+        b"Date,Narration,Chq/Ref No,Withdrawal Amt,Deposit Amt\n"
+        b"01/04/24,NEFT VENDOR PAYMENT,N123,15075.00,\n"
+    )
+
+    response = client.post(
+        "/reconcile",
+        files={
+            "bank_file": ("statement.csv", csv_bytes, "text/csv"),
+            "ledger_file": ("statement.csv", csv_bytes, "text/csv"),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "same file" in response.json()["detail"]

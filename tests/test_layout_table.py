@@ -93,3 +93,21 @@ def test_left_margin_footer_is_not_glued_to_the_last_transaction() -> None:
 def test_returns_none_when_there_is_no_aligned_table() -> None:
     """Signals the caller to fall back to the model rather than inventing rows."""
     assert parse_layout_table("Dear customer,\n\nYour statement is attached.\n") is None
+
+
+_WIDE_VALUE = """\
+    Date          Particulars                                     Debit          Credit
+
+    01-Jul-2026   Rajesh Kumar Traders - Purchase Invoice #INV-2241   12,500.00
+"""
+
+
+def test_amount_wider_than_its_header_does_not_bleed_into_the_description() -> None:
+    """Money values are right-aligned, so a value wider than its own column heading
+    starts to the LEFT of it. Slicing the description at the header position leaves
+    the value's leading digits stuck on the narration."""
+    rows = parse_layout_table(_WIDE_VALUE)
+    assert rows is not None
+
+    assert rows[0]["description"] == "Rajesh Kumar Traders - Purchase Invoice #INV-2241"
+    assert rows[0]["debit"] == "12,500.00"

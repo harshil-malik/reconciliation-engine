@@ -152,13 +152,36 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
                     rows[-1]["description"] = f"{rows[-1]['description']} {extra}".strip()
             continue
 
+        # Candidate money tokens: a real table cell is whitespace-delimited, so a run
+        # of digits welded onto other text ("#INV-2241") is part of the narration
+        # however close to a money column it happens to fall.
+        candidates = [
+            m
+            for m in _AMOUNT.finditer(line)
+            if m.start() >= first_money_start - _COLUMN_TOLERANCE
+            and (m.start() == 0 or line[m.start() - 1].isspace())
+        ]
+
+        # Assign per column rather than per token, taking whichever candidate aligns
+        # best with that column's right edge. Iterating tokens and letting the first
+        # one claim a column lets a stray value seize the slot the real figure wants.
         values: dict[str, str] = {}
-        for match in _AMOUNT.finditer(line):
-            if match.start() < first_money_start - _COLUMN_TOLERANCE:
-                continue  # part of the narration (e.g. an invoice number), not money
-            column_name = _assign_amount(match.end(), money_columns)
-            if column_name and column_name not in values:
-                values[column_name] = match.group()
+        claimed: set[int] = set()
+        for column in money_columns:
+            best, best_distance = None, _COLUMN_TOLERANCE + 1
+            for index, m in enumerate(candidates):
+                if index in claimed:
+                    continue
+                distance = abs(m.end() - column.end)
+                if distance < best_distance:
+                    best, best_distance = index, distance
+            if best is not None:
+                claimed.add(best)
+                values[column.name] = candidates[best].group()
+
+        earliest_money_start = (
+            min(candidates[i].start() for i in claimed) if claimed else None
+        )
 
         description_start = (
             columns["description"].start if "description" in columns else date_match.end()
@@ -167,9 +190,18 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
         # cheque number gets appended to the narration — which both looks wrong in
         # the report and degrades the fuzzy description matching in Stage 1 and the
         # embeddings in Stage 2.
-        description_end = (
-            columns["reference"].start if "reference" in columns else first_money_start
-        )
+        # Where the narration ends: at the reference column when the table has one,
+        # otherwise immediately before the first figure actually assigned to a money
+        # column. Using the money column's HEADER position instead would cut through
+        # a long narration, because a value wider than its heading starts to the left
+        # of it — and would leave that value's leading digits on the narration when
+        # the narration is short ("...#INV-2241  1250").
+        if "reference" in columns:
+            description_end = columns["reference"].start
+        else:
+            description_end = (
+                earliest_money_start if earliest_money_start is not None else first_money_start
+            )
         description = line[description_start:description_end].strip()
 
         reference = None

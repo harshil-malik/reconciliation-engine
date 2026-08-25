@@ -30,7 +30,13 @@ _ROWS_SCHEMA = {
                     "debit": {"type": "string"},
                     "credit": {"type": "string"},
                 },
-                "required": ["date", "description", "debit", "credit"],
+                # `reference` is required even though it is nullable: with it
+                # optional, grammar-constrained decoding let the model omit the key
+                # entirely and every extracted row came back with reference=None,
+                # silently losing the cheque/UTR numbers that are Stage 1's
+                # strongest matching signal. Requiring it forces an explicit value
+                # or an explicit null.
+                "required": ["date", "description", "reference", "debit", "credit"],
             },
         }
     },

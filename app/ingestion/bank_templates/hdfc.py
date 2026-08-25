@@ -15,6 +15,18 @@ Return ONLY a JSON array (no prose, no markdown code fences) where each element 
    "debit": "<Withdrawal Amt as printed, or \\"0\\" if blank>",
    "credit": "<Deposit Amt as printed, or \\"0\\" if blank>"}
 
+CRITICAL — getting debit vs credit right:
+Each transaction row has money in EITHER the Withdrawal column OR the Deposit
+column, never both. Decide which by the amount's horizontal position under the
+column headers, not by guessing from the narration:
+  - money under "Withdrawal Amt." -> "debit"; set "credit" to "0"
+  - money under "Deposit Amt."    -> "credit"; set "debit" to "0"
+The LAST number on a row is the Closing Balance — it is a running total, never a
+transaction amount. Never report it as debit or credit.
+
+Always include the "reference" key. Use the Chq./Ref.No. exactly as printed, or
+null when that cell is blank — never omit the key.
+
 Skip header/footer/summary rows (opening balance, statement summary, page totals).
 Preserve numbers and text exactly as printed — do not reformat dates or strip
 leading zeros or thousands separators.

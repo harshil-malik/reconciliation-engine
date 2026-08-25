@@ -4,6 +4,7 @@ import logging
 
 from app.matching.matcher import match
 from app.matching.text_similarity import candidate_similarity
+from app.matching.tolerance import CORROBORATION_FLOOR
 from app.schema import Transaction
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 # alone is cheap: on a statement carrying same-day offsetting legs, the inverted
 # convention lines up with the nameless leg and scores just as many matches as the
 # correct one. Requiring a little description agreement separates them.
-_CORROBORATION_FLOOR = 0.3
+_CORROBORATION_FLOOR = CORROBORATION_FLOOR
 
 
 class ConventionChoice:

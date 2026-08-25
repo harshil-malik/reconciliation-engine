@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from app.matching.models import MatchedPair, MatchResult
-from app.matching.text_similarity import candidate_similarity
+from app.matching.text_similarity import (
+    candidate_similarity,
+    descriptions_corroborate,
+    references_match,
+)
+from app.matching.tolerance import CORROBORATION_FLOOR
 from app.schema import Transaction
 
 
@@ -56,12 +61,26 @@ def match(
                 else "exact_amount_near_date_fuzzy_desc"
             )
 
+        # Record what actually backs this pairing. Amount and date agreeing is the
+        # weakest case and stays a match — but it is the one where two unrelated
+        # payments of the same size on the same day are indistinguishable, so the
+        # report says so rather than presenting every match as equally sound.
+        if similarity is None:
+            similarity = candidate_similarity(bank_txn, chosen)
+        if references_match(bank_txn, chosen):
+            corroboration = "reference"
+        elif descriptions_corroborate(bank_txn, chosen):
+            corroboration = "description"
+        else:
+            corroboration = "amount_and_date_only"
+
         matched.append(
             MatchedPair(
                 bank_transaction=bank_txn,
                 ledger_transaction=chosen,
                 rule=rule,
                 similarity=similarity,
+                corroboration=corroboration,
             )
         )
         remaining_ledger.remove(chosen)

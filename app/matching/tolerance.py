@@ -10,6 +10,14 @@ from app.schema import Transaction
 MAX_FEE_GAP_ABSOLUTE = Decimal("500")
 MAX_FEE_GAP_FRACTION = Decimal("0.02")
 
+# Above this, two descriptions are taken to be talking about the same counterparty.
+# Used to LABEL how well a match is corroborated, never to block one: measured on
+# real pairs, an unrelated pair ("NEFT TO GLOBEX LTD" vs "Payment to Initech Pvt
+# Ltd", 0.50 — inflated by shared boilerplate) can outscore genuine ones ("CHQ
+# DEP-000452" vs "Cheque deposit - client advance", 0.36), so no threshold separates
+# right from wrong here. Surfacing the weak ones beats silently dropping the good.
+CORROBORATION_FLOOR = 0.35
+
 
 def fee_gap_is_plausible(
     bank_txn: Transaction,

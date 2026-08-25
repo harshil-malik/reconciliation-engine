@@ -28,12 +28,28 @@ MatchRule = Literal[
 ]
 
 
+# How much evidence backs a match, beyond the amount and date agreeing:
+#   reference            — both sides carry the same cheque/UTR/voucher number, which
+#                          is as close to proof as reconciliation gets
+#   description          — the payees or narrations correspond
+#   amount_and_date_only — nothing but the figures line up. Usually still right, but
+#                          two unrelated payments of the same size on the same day
+#                          look identical to this rule, so these are the rows worth a
+#                          CA's eye. Reported rather than withheld: measured on real
+#                          data, no similarity threshold separates the wrong ones from
+#                          the right ones, so refusing them would lose genuine matches
+#                          while keeping the bad one.
+Corroboration = Literal["reference", "description", "amount_and_date_only"]
+
+
 class MatchedPair(BaseModel):
     bank_transaction: Transaction
     ledger_transaction: Transaction
     rule: MatchRule
-    # Set only when the fuzzy tiebreak rule fired; the score that cleared the threshold.
+    # Description/reference similarity for the pair, recorded on every match so the
+    # weakly-evidenced ones can be told apart in the report.
     similarity: Optional[float] = None
+    corroboration: Corroboration = "amount_and_date_only"
 
 
 class MatchResult(BaseModel):

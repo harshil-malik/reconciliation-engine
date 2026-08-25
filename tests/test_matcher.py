@@ -147,3 +147,35 @@ def test_extra_unmatched_rows_on_either_side_are_reported() -> None:
     assert len(result.matched) == 1
     assert result.unmatched_bank == [extra_bank]
     assert result.unmatched_ledger == [extra_ledger]
+
+
+def test_match_backed_only_by_amount_and_date_is_labelled_for_review() -> None:
+    """The GLOBEX/Initech case: two unrelated payments of the same size on the same
+    day are indistinguishable from a real pair on figures alone. The match is still
+    made — no similarity threshold separates these from genuine ones, so refusing
+    them would lose good matches — but the report says what it rests on."""
+    bank = _txn(source="bank", amount="-20000", day=2, description="NEFT TO GLOBEX LTD")
+    ledger = _txn(source="ledger", amount="-20000", day=2, description="Payment to Initech Pvt Ltd")
+
+    pair = match([bank], [ledger]).matched[0]
+
+    assert pair.corroboration == "amount_and_date_only"
+    assert pair.similarity is not None
+
+
+def test_matching_reference_is_recorded_as_the_strongest_evidence() -> None:
+    bank = _txn(source="bank", amount="-15075", day=1, description="NEFT VENDOR PAYMENT", reference="N123")
+    ledger = _txn(source="ledger", amount="-15075", day=1, description="Totally different wording", reference="N123")
+
+    pair = match([bank], [ledger]).matched[0]
+
+    assert pair.corroboration == "reference"
+
+
+def test_corresponding_descriptions_are_recorded_as_corroboration() -> None:
+    bank = _txn(source="bank", amount="-40000", day=25, description="NEFT-OFFICE RENT JULY")
+    ledger = _txn(source="ledger", amount="-40000", day=25, description="Office rent - July")
+
+    pair = match([bank], [ledger]).matched[0]
+
+    assert pair.corroboration == "description"

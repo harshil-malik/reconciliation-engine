@@ -4,7 +4,7 @@ import logging
 from decimal import Decimal
 
 from app.matching.models import MatchedPair, MatchResult
-from app.matching.text_similarity import candidate_similarity
+from app.matching.text_similarity import candidate_similarity, references_match
 from app.matching.tolerance import fee_gap_is_plausible, same_direction
 from app.schema import NO_NARRATION, Transaction
 
@@ -91,6 +91,9 @@ def match_near(
                 ledger_transaction=ledger_txn,
                 rule="near_amount_matching_description",
                 similarity=similarity,
+                corroboration=(
+                    "reference" if references_match(bank_txn, ledger_txn) else "description"
+                ),
             )
         )
         logger.info(

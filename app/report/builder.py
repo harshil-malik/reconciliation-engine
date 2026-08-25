@@ -23,7 +23,14 @@ def _txn_fields(txn: Transaction, *, prefix: str) -> dict:
 def _matched_sheet(match_result: MatchResult) -> pd.DataFrame:
     rows = []
     for pair in match_result.matched:
-        row = {"rule": pair.rule, "similarity": pair.similarity}
+        # `corroboration` is what a reviewer should scan first: rows marked
+        # amount_and_date_only rest on the figures alone, which is where two
+        # unrelated payments of the same size on the same day would be paired.
+        row = {
+            "rule": pair.rule,
+            "corroboration": pair.corroboration,
+            "similarity": pair.similarity,
+        }
         row.update(_txn_fields(pair.bank_transaction, prefix="bank"))
         row.update(_txn_fields(pair.ledger_transaction, prefix="ledger"))
         rows.append(row)
@@ -69,6 +76,7 @@ def _anomalies_sheet(anomaly_result: AnomalyResult) -> pd.DataFrame:
 _SHEET_COLUMNS = {
     "Matched": [
         "rule",
+        "corroboration",
         "similarity",
         "bank_date",
         "bank_amount",

@@ -15,11 +15,16 @@ from app.schema import Transaction
 #                          window (bank clearing lag vs ledger entry date).
 # ..._fuzzy_desc variants: several candidates shared amount and date, and reference
 #                          or description similarity broke the tie.
+# near_amount_matching_description: Stage 1.5 — amounts differ by no more than a
+#                          bank fee or rounding, dates fall in a wider window, and
+#                          the descriptions or references correspond. Deterministic
+#                          and explainable, unlike an AI-confirmed match.
 MatchRule = Literal[
     "exact_amount_same_date",
     "exact_amount_near_date",
     "exact_amount_same_date_fuzzy_desc",
     "exact_amount_near_date_fuzzy_desc",
+    "near_amount_matching_description",
 ]
 
 

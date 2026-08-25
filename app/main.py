@@ -33,6 +33,7 @@ from app.ingestion.ledger_templates.generic_ledger import (
 from app.ingestion.pdf_parser import PDFExtractionError, parse_pdf
 from app.ingestion.vision_client import LocalPDFExtractor, VisionExtractor
 from app.matching.matcher import match
+from app.matching.near_matcher import match_near
 from app.report.builder import build_report
 from app.schema import Transaction
 
@@ -283,6 +284,8 @@ async def reconcile(
     _log_ingestion(bank_txns, ledger_txns)
 
     match_result = match(bank_txns, ledger_txns)
+    # Stage 1.5: deterministic fee/lag-tolerant recovery before any model is asked.
+    match_result = match_near(match_result)
     ai_result = match_with_ai(
         match_result, embedding_client=embedding_client, confirmer=confirmer
     )

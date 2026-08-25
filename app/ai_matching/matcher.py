@@ -2,26 +2,16 @@ from __future__ import annotations
 
 import logging
 import re
-from decimal import Decimal
 
 from app.ai_matching.confirmer import ConfirmationResult, MatchConfirmer
 from app.ai_matching.embeddings import EmbeddingClient
 from app.ai_matching.models import AIMatchedPair, AIMatchResult
 from app.ai_matching.shortlist import shortlist_candidates
 from app.matching.models import MatchResult
+from app.matching.tolerance import fee_gap_is_plausible, same_direction
 from app.schema import NO_NARRATION, Transaction
 
 logger = logging.getLogger(__name__)
-
-# Stage 2 exists to recover pairs separated by a bank fee, rounding, or a clearing
-# lag — not to pair up arbitrary amounts. A fee is small in both absolute and
-# relative terms, so a gap beyond BOTH of these cannot be one, and the pair is
-# rejected without spending a model call. Observed necessity: a local 3B matched
-# -12,500 to -8,340 (a 33% gap) at 0.8 confidence while asserting in its reasoning
-# that the amounts were "the same".
-_MAX_FEE_GAP_ABSOLUTE = Decimal("500")
-_MAX_FEE_GAP_FRACTION = Decimal("0.02")
-
 
 def _identifying_text(txn: Transaction) -> str:
     """What the model could use to tell WHO this transaction was with."""
@@ -33,10 +23,6 @@ def _identifying_text(txn: Transaction) -> str:
     return description if re.search(r"[A-Za-z]{3}", description) else ""
 
 
-def _fee_gap_is_plausible(bank_txn: Transaction, ledger_txn: Transaction) -> bool:
-    gap = abs(bank_txn.amount - ledger_txn.amount)
-    magnitude = max(abs(bank_txn.amount), abs(ledger_txn.amount))
-    return gap <= max(_MAX_FEE_GAP_ABSOLUTE, magnitude * _MAX_FEE_GAP_FRACTION)
 
 
 def match_with_ai(
@@ -86,7 +72,7 @@ def match_with_ai(
         # model — a local 3B was observed confidently matching +60,000 against
         # -60,000, and a wrong match silently hides a real discrepancy. Skipping also
         # saves a model call.
-        if (bank_txn.amount > 0) != (ledger_txn.amount > 0):
+        if not same_direction(bank_txn, ledger_txn):
             continue
 
         # Without a payee or reference on BOTH sides there is no evidence of who the
@@ -98,7 +84,7 @@ def match_with_ai(
 
         # A gap too large to be a bank fee or rounding is not the problem Stage 2
         # was built to solve, whatever the model thinks of the descriptions.
-        if not _fee_gap_is_plausible(bank_txn, ledger_txn):
+        if not fee_gap_is_plausible(bank_txn, ledger_txn):
             continue
 
         try:

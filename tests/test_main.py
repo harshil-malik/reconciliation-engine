@@ -136,15 +136,21 @@ def test_reconcile_runs_full_pipeline_and_returns_report() -> None:
     sheets = pd.read_excel(io.BytesIO(response.content), sheet_name=None)
     assert set(sheets.keys()) == {"Matched", "AI Matched", "Unmatched", "Anomalies"}
 
+    matched = sheets["Matched"]
+    rules = set(matched["rule"])
+
     # row 1 (₹15,075, same date both sides) clears Stage 1 deterministically
-    assert len(sheets["Matched"]) == 1
-    assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_same_date"
+    assert "exact_amount_same_date" in rules
 
-    # row 2 (₹998 bank vs ₹1000 ledger) fails Stage 1's exact-amount rule and is
-    # picked up by the AI net via the overridden fake embedding/confirmer clients
-    assert len(sheets["AI Matched"]) == 1
-    assert sheets["AI Matched"].iloc[0]["confidence"] == 0.9
+    # row 2 (₹998 bank vs ₹1000 ledger) fails Stage 1's exact-amount rule, but the
+    # ₹2 gap is fee-sized and the descriptions correspond, so Stage 1.5 resolves it
+    # without a model — leaving the AI net with nothing to do. The fake confirmer is
+    # still wired up above and would happily have claimed this pair; that it no
+    # longer gets the chance is the point.
+    assert "near_amount_matching_description" in rules
+    assert len(matched) == 2
 
+    assert len(sheets["AI Matched"]) == 0
     assert len(sheets["Unmatched"]) == 0
 
 

@@ -25,6 +25,7 @@ from app.ingestion.bank_templates.base import BankPDFTemplate
 from app.ingestion.bank_templates.hdfc import HDFCBankTemplate
 from app.ingestion.csv_parser import parse_csv
 from app.ingestion.excel_parser import parse_excel
+from app.ingestion.ledger_convention import choose_ledger_convention
 from app.ingestion.ledger_templates.generic_ledger import (
     BankAccountLedgerTemplate,
     GenericLedgerTemplate,
@@ -58,6 +59,10 @@ _BANK_TEMPLATES: dict[str, BankPDFTemplate] = {"hdfc": HDFCBankTemplate()}
 # the ledger covers, and picking the wrong one inverts every amount in the file
 # without failing loudly. "bank_account_ledger" is listed first as it is the usual
 # counterpart to a bank statement.
+# Offered in the UI ahead of the named conventions: picking the wrong one
+# inverts every amount without failing loudly, so detection is the safe default.
+AUTO_LEDGER_TEMPLATE = "auto"
+
 _LEDGER_TEMPLATES: dict[str, BankPDFTemplate] = {
     "bank_account_ledger": BankAccountLedgerTemplate(),
     "generic_ledger": GenericLedgerTemplate(),
@@ -139,7 +144,7 @@ def bank_templates() -> dict:
 
 @app.get("/ledger-templates")
 def ledger_templates() -> dict:
-    return {"templates": list(_LEDGER_TEMPLATES)}
+    return {"templates": [AUTO_LEDGER_TEMPLATE, *_LEDGER_TEMPLATES]}
 
 
 _TEMPLATE_REGISTRIES: dict[Literal["bank", "ledger"], dict[str, BankPDFTemplate]] = {
@@ -249,13 +254,32 @@ async def reconcile(
         vision_extractor=vision_extractor,
         contents=bank_bytes,
     )
-    ledger_txns = await _parse_upload(
-        ledger_file,
-        source="ledger",
-        pdf_template=ledger_pdf_template,
-        vision_extractor=vision_extractor,
-        contents=ledger_bytes,
-    )
+
+    if ledger_pdf_template in (None, AUTO_LEDGER_TEMPLATE) and Path(
+        ledger_file.filename or ""
+    ).suffix.lower() == ".pdf":
+        # Parse the ledger under every convention and keep whichever reconciles.
+        # Cheap: extraction is deterministic and runs off the already-read bytes, so
+        # this costs a second table parse, not a second model call.
+        candidates = {}
+        for name in _LEDGER_TEMPLATES:
+            candidates[name] = await _parse_upload(
+                ledger_file,
+                source="ledger",
+                pdf_template=name,
+                vision_extractor=vision_extractor,
+                contents=ledger_bytes,
+            )
+        ledger_txns = choose_ledger_convention(bank_txns, candidates).transactions
+    else:
+        ledger_txns = await _parse_upload(
+            ledger_file,
+            source="ledger",
+            pdf_template=ledger_pdf_template,
+            vision_extractor=vision_extractor,
+            contents=ledger_bytes,
+        )
+
     _log_ingestion(bank_txns, ledger_txns)
 
     match_result = match(bank_txns, ledger_txns)

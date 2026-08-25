@@ -121,10 +121,15 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
             # its description.
             indent = len(line) - len(line.lstrip())
             description_start = columns["description"].start if "description" in columns else 0
+            # Must line up with the description column, give or take a couple of
+            # characters. A generous tolerance here lets left-margin footers
+            # ("This is a synthetic statement...") qualify as narration and get
+            # glued onto the final transaction's description.
             if (
                 rows
                 and not _AMOUNT.search(line)
-                and indent >= description_start - _COLUMN_TOLERANCE
+                and description_start > 0
+                and indent >= description_start - 2
             ):
                 extra = line[:first_money_start].strip()
                 if extra:
@@ -139,8 +144,17 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
             if column_name and column_name not in values:
                 values[column_name] = match.group()
 
-        description_start = columns["description"].start if "description" in columns else date_match.end()
-        description = line[description_start:first_money_start].strip()
+        description_start = (
+            columns["description"].start if "description" in columns else date_match.end()
+        )
+        # Stop at the reference column when there is one, otherwise the voucher /
+        # cheque number gets appended to the narration — which both looks wrong in
+        # the report and degrades the fuzzy description matching in Stage 1 and the
+        # embeddings in Stage 2.
+        description_end = (
+            columns["reference"].start if "reference" in columns else first_money_start
+        )
+        description = line[description_start:description_end].strip()
 
         reference = None
         if "reference" in columns:

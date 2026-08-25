@@ -8,3 +8,5 @@ venv/
 # Local GGUF model weights — multi-GB, downloaded per machine (see README.md)
 models/
 *.gguf
+# Generated test fixtures — rebuild with scripts/make_sample_data.py
+sample_data/

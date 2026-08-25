@@ -64,6 +64,32 @@ def test_wrapped_narration_appends_and_footer_does_not() -> None:
     assert len(rows) == 4
 
 
+_WITH_REFERENCE = """\
+Date        Narration                        Chq./Ref.No.     Withdrawal Amt.   Deposit Amt.        Balance
+
+01/07/2026  NEFT-VENDOR PAYMENT ACME LTD     NFT1520                15,320.00                    1,14,680.00
+This is a synthetic statement generated for software testing.
+"""
+
+
+def test_reference_is_not_appended_to_the_description() -> None:
+    """A voucher number left in the narration reads wrong in the report and degrades
+    both the Stage 1 fuzzy tiebreak and the Stage 2 embeddings."""
+    rows = parse_layout_table(_WITH_REFERENCE)
+    assert rows is not None
+
+    assert rows[0]["description"] == "NEFT-VENDOR PAYMENT ACME LTD"
+    assert rows[0]["reference"] == "NFT1520"
+
+
+def test_left_margin_footer_is_not_glued_to_the_last_transaction() -> None:
+    rows = parse_layout_table(_WITH_REFERENCE)
+    assert rows is not None
+
+    assert len(rows) == 1
+    assert "synthetic" not in rows[0]["description"]
+
+
 def test_returns_none_when_there_is_no_aligned_table() -> None:
     """Signals the caller to fall back to the model rather than inventing rows."""
     assert parse_layout_table("Dear customer,\n\nYour statement is attached.\n") is None

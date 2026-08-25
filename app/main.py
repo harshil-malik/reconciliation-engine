@@ -24,7 +24,10 @@ from app.ingestion.bank_templates.base import BankPDFTemplate
 from app.ingestion.bank_templates.hdfc import HDFCBankTemplate
 from app.ingestion.csv_parser import parse_csv
 from app.ingestion.excel_parser import parse_excel
-from app.ingestion.ledger_templates.generic_ledger import GenericLedgerTemplate
+from app.ingestion.ledger_templates.generic_ledger import (
+    BankAccountLedgerTemplate,
+    GenericLedgerTemplate,
+)
 from app.ingestion.pdf_parser import parse_pdf
 from app.ingestion.vision_client import LocalPDFExtractor, VisionExtractor
 from app.matching.matcher import match
@@ -37,7 +40,14 @@ app = FastAPI(title="Reconciliation Engine")
 # time, not a generic parser). Separate from ledger templates because a bank
 # statement's layout has nothing in common with a ledger export's layout.
 _BANK_TEMPLATES: dict[str, BankPDFTemplate] = {"hdfc": HDFCBankTemplate()}
-_LEDGER_TEMPLATES: dict[str, BankPDFTemplate] = {"generic_ledger": GenericLedgerTemplate()}
+# Two ledger templates because the Debit/Credit convention differs by which account
+# the ledger covers, and picking the wrong one inverts every amount in the file
+# without failing loudly. "bank_account_ledger" is listed first as it is the usual
+# counterpart to a bank statement.
+_LEDGER_TEMPLATES: dict[str, BankPDFTemplate] = {
+    "bank_account_ledger": BankAccountLedgerTemplate(),
+    "generic_ledger": GenericLedgerTemplate(),
+}
 
 
 # Dependency providers for the model clients. Routes take these via Depends() rather

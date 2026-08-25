@@ -326,13 +326,24 @@
     updateReconcileEnabled();
   });
 
+  // Choosing the wrong ledger convention inverts every amount in the file and fails
+  // silently — almost nothing reconciles, with no error to explain why. So these are
+  // spelled out rather than shown as raw template ids.
+  const TEMPLATE_LABELS = {
+    hdfc: "HDFC Bank statement",
+    bank_account_ledger: "Bank A/c ledger — Debit = money received",
+    generic_ledger: "Supplier / expense ledger — Debit = money paid out",
+  };
+
   async function loadTemplates(endpoint, selectEl, placeholder) {
     try {
       const response = await fetch(endpoint);
       const data = await response.json();
       selectEl.innerHTML =
         `<option value="">${placeholder}</option>` +
-        data.templates.map((t) => `<option value="${t}">${t.toUpperCase()}</option>`).join("");
+        data.templates
+          .map((t) => `<option value="${t}">${TEMPLATE_LABELS[t] || t.toUpperCase()}</option>`)
+          .join("");
     } catch (err) {
       selectEl.innerHTML = `<option value="">Could not load templates</option>`;
     }

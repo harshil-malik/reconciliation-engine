@@ -29,6 +29,12 @@ _ROWS_SCHEMA = {
                     "reference": {"type": ["string", "null"]},
                     "debit": {"type": "string"},
                     "credit": {"type": "string"},
+                    # The running balance is captured not to report it, but to
+                    # audit the extraction: consecutive balances differ by exactly
+                    # the transaction amount, which lets parse_pdf verify the
+                    # model's debit/credit reading arithmetically instead of
+                    # trusting it. See _reconcile_against_balances().
+                    "balance": {"type": ["string", "null"]},
                 },
                 # `reference` is required even though it is nullable: with it
                 # optional, grammar-constrained decoding let the model omit the key
@@ -36,7 +42,14 @@ _ROWS_SCHEMA = {
                 # silently losing the cheque/UTR numbers that are Stage 1's
                 # strongest matching signal. Requiring it forces an explicit value
                 # or an explicit null.
-                "required": ["date", "description", "reference", "debit", "credit"],
+                "required": [
+                    "date",
+                    "description",
+                    "reference",
+                    "debit",
+                    "credit",
+                    "balance",
+                ],
             },
         }
     },
@@ -87,9 +100,29 @@ class LocalPDFExtractor:
 
 
 def _pdf_text(pdf_bytes: bytes) -> str:
+    """Extract the PDF's text with column geometry preserved as far as possible.
+
+    `extraction_mode="layout"` reproduces the page's spatial arrangement using
+    whitespace, so a statement's columns stay visually aligned. The default mode
+    concatenates text in content-stream order, which collapses a table into a
+    stream of values with no way to tell which column a number came from — the
+    model then has to guess, and guesses wrong in exactly the expensive direction
+    (reading a running balance as a transaction amount).
+
+    Falls back to the default mode when layout extraction yields nothing, since
+    layout mode can come up empty on unusual content streams.
+    """
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(pdf_bytes))
+    try:
+        text = "\n".join(
+            page.extract_text(extraction_mode="layout") or "" for page in reader.pages
+        )
+        if text.strip():
+            return text
+    except Exception:  # noqa: BLE001 - layout mode is best-effort, plain is the floor
+        pass
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 

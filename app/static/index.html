@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reconciliation Engine</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --border: #dde1e6;
+    --border-hover: #2f6f5e;
+    --text: #1b1f23;
+    --text-muted: #5b6470;
+    --accent: #2f6f5e;
+    --accent-dark: #244f43;
+    --error-bg: #fdecec;
+    --error-text: #9c2b2b;
+    --success-bg: #eaf7ef;
+    --success-text: #1e6b3c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 48px 20px;
+  }
+
+  main {
+    width: 100%;
+    max-width: 760px;
+  }
+
+  header {
+    margin-bottom: 32px;
+  }
+
+  h1 {
+    font-size: 26px;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+
+  header p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 15px;
+  }
+
+  .dropzones {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .dropzone {
+    flex: 1 1 300px;
+    background: var(--surface);
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 28px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .dropzone:hover,
+  .dropzone.dragover {
+    border-color: var(--border-hover);
+    background: #f2f8f6;
+  }
+
+  .dropzone.has-file {
+    border-style: solid;
+    border-color: var(--accent);
+  }
+
+  .dropzone h2 {
+    font-size: 15px;
+    margin: 0 0 6px;
+    font-weight: 600;
+  }
+
+  .dropzone .hint {
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .dropzone .filename {
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-dark);
+    word-break: break-all;
+  }
+
+  .dropzone input[type="file"] {
+    display: none;
+  }
+
+  .template-row {
+    margin-top: 16px;
+    display: none;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .template-row.visible {
+    display: flex;
+  }
+
+  .template-row label {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .template-row select {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 14px;
+    background: var(--surface);
+  }
+
+  .actions {
+    margin-top: 28px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  button#reconcile {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 22px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  button#reconcile:disabled {
+    background: #b7c2bd;
+    cursor: not-allowed;
+  }
+
+  button#reconcile:not(:disabled):hover {
+    background: var(--accent-dark);
+  }
+
+  .status {
+    font-size: 14px;
+  }
+
+  .status.error {
+    color: var(--error-text);
+    background: var(--error-bg);
+    padding: 10px 14px;
+    border-radius: 8px;
+    display: inline-block;
+  }
+
+  .status.success {
+    color: var(--success-text);
+    background: var(--success-bg);
+    padding: 10px 14px;
+    border-radius: 8px;
+    display: inline-block;
+  }
+
+  .status.loading {
+    color: var(--text-muted);
+  }
+
+  footer {
+    margin-top: 40px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Reconciliation Engine</h1>
+    <p>Drop your bank statement and internal ledger below to generate an audit-ready reconciliation report.</p>
+  </header>
+
+  <div class="dropzones">
+    <div class="dropzone" id="bank-zone" data-role="bank">
+      <h2>Bank Statement</h2>
+      <div class="hint">CSV, Excel, or PDF<br />Drop file or click to browse</div>
+      <div class="filename" id="bank-filename"></div>
+      <input type="file" id="bank-input" accept=".csv,.xlsx,.xls,.pdf" />
+    </div>
+
+    <div class="dropzone" id="ledger-zone" data-role="ledger">
+      <h2>Internal Ledger</h2>
+      <div class="hint">CSV, Excel, or PDF<br />Drop file or click to browse</div>
+      <div class="filename" id="ledger-filename"></div>
+      <input type="file" id="ledger-input" accept=".csv,.xlsx,.xls,.pdf" />
+    </div>
+  </div>
+
+  <div class="template-row" id="bank-template-row">
+    <label for="bank-template-select">Bank template (required for PDF)</label>
+    <select id="bank-template-select"></select>
+  </div>
+
+  <div class="template-row" id="ledger-template-row">
+    <label for="ledger-template-select">Ledger template (required for PDF)</label>
+    <select id="ledger-template-select"></select>
+  </div>
+
+  <div class="actions">
+    <button id="reconcile" disabled>Generate Report</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <footer>Matched / AI-Matched / Unmatched / Anomalies — exported as one .xlsx workbook.</footer>
+</main>
+
+<script>
+  const state = { bank: null, ledger: null, bankTemplate: null, ledgerTemplate: null };
+
+  const bankZone = document.getElementById("bank-zone");
+  const ledgerZone = document.getElementById("ledger-zone");
+  const bankInput = document.getElementById("bank-input");
+  const ledgerInput = document.getElementById("ledger-input");
+  const bankFilenameEl = document.getElementById("bank-filename");
+  const ledgerFilenameEl = document.getElementById("ledger-filename");
+  const bankTemplateRow = document.getElementById("bank-template-row");
+  const bankTemplateSelect = document.getElementById("bank-template-select");
+  const ledgerTemplateRow = document.getElementById("ledger-template-row");
+  const ledgerTemplateSelect = document.getElementById("ledger-template-select");
+  const reconcileBtn = document.getElementById("reconcile");
+  const statusEl = document.getElementById("status");
+
+  function extensionOf(filename) {
+    const parts = filename.toLowerCase().split(".");
+    return parts.length > 1 ? "." + parts[parts.length - 1] : "";
+  }
+
+  function setStatus(kind, message) {
+    statusEl.className = "status" + (kind ? " " + kind : "");
+    statusEl.textContent = message || "";
+  }
+
+  function updateReconcileEnabled() {
+    const bankNeedsTemplate = state.bank && extensionOf(state.bank.name) === ".pdf";
+    const ledgerNeedsTemplate = state.ledger && extensionOf(state.ledger.name) === ".pdf";
+    reconcileBtn.disabled = !(
+      state.bank &&
+      state.ledger &&
+      (!bankNeedsTemplate || state.bankTemplate) &&
+      (!ledgerNeedsTemplate || state.ledgerTemplate)
+    );
+  }
+
+  function setFile(role, file) {
+    if (!file) return;
+    const ext = extensionOf(file.name);
+    const allowed = [".csv", ".xlsx", ".xls", ".pdf"];
+    if (!allowed.includes(ext)) {
+      setStatus("error", `Unsupported file type "${ext}" for ${role === "bank" ? "bank statement" : "ledger"}.`);
+      return;
+    }
+    setStatus("");
+
+    if (role === "bank") {
+      state.bank = file;
+      bankFilenameEl.textContent = file.name;
+      bankZone.classList.add("has-file");
+      bankTemplateRow.classList.toggle("visible", ext === ".pdf");
+      if (ext !== ".pdf") state.bankTemplate = null;
+    } else {
+      state.ledger = file;
+      ledgerFilenameEl.textContent = file.name;
+      ledgerZone.classList.add("has-file");
+      ledgerTemplateRow.classList.toggle("visible", ext === ".pdf");
+      if (ext !== ".pdf") state.ledgerTemplate = null;
+    }
+    updateReconcileEnabled();
+  }
+
+  function wireDropzone(zone, input, role) {
+    zone.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => setFile(role, input.files[0]));
+
+    ["dragover", "dragenter"].forEach((evt) =>
+      zone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        zone.classList.add("dragover");
+      })
+    );
+    ["dragleave", "dragend"].forEach((evt) =>
+      zone.addEventListener(evt, () => zone.classList.remove("dragover"))
+    );
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      zone.classList.remove("dragover");
+      if (e.dataTransfer.files.length) setFile(role, e.dataTransfer.files[0]);
+    });
+  }
+
+  wireDropzone(bankZone, bankInput, "bank");
+  wireDropzone(ledgerZone, ledgerInput, "ledger");
+
+  bankTemplateSelect.addEventListener("change", () => {
+    state.bankTemplate = bankTemplateSelect.value || null;
+    updateReconcileEnabled();
+  });
+
+  ledgerTemplateSelect.addEventListener("change", () => {
+    state.ledgerTemplate = ledgerTemplateSelect.value || null;
+    updateReconcileEnabled();
+  });
+
+  async function loadTemplates(endpoint, selectEl, placeholder) {
+    try {
+      const response = await fetch(endpoint);
+      const data = await response.json();
+      selectEl.innerHTML =
+        `<option value="">${placeholder}</option>` +
+        data.templates.map((t) => `<option value="${t}">${t.toUpperCase()}</option>`).join("");
+    } catch (err) {
+      selectEl.innerHTML = `<option value="">Could not load templates</option>`;
+    }
+  }
+  loadTemplates("/bank-templates", bankTemplateSelect, "Select a bank…");
+  loadTemplates("/ledger-templates", ledgerTemplateSelect, "Select a ledger format…");
+
+  reconcileBtn.addEventListener("click", async () => {
+    const formData = new FormData();
+    formData.append("bank_file", state.bank);
+    formData.append("ledger_file", state.ledger);
+    if (state.bankTemplate) formData.append("bank_pdf_template", state.bankTemplate);
+    if (state.ledgerTemplate) formData.append("ledger_pdf_template", state.ledgerTemplate);
+
+    reconcileBtn.disabled = true;
+    setStatus("loading", "Reconciling — this can take a minute…");
+
+    try {
+      const response = await fetch("/reconcile", { method: "POST", body: formData });
+      if (!response.ok) {
+        let message = `Request failed (${response.status})`;
+        try {
+          const data = await response.json();
+          if (data.detail) message = data.detail;
+        } catch (_) {}
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "reconciliation_report.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setStatus("success", "Report downloaded ✓");
+    } catch (err) {
+      setStatus("error", err.message);
+    } finally {
+      updateReconcileEnabled();
+    }
+  });
+</script>
+</body>
+</html>

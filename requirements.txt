@@ -1,0 +1,18 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pandas
+openpyxl
+pydantic>=2
+python-dotenv
+# httpx talks to the local llama.cpp server (and backs FastAPI's TestClient);
+# pypdf pulls the text layer out of PDFs for the local text-only extractor.
+httpx
+pypdf
+# Optional hosted-provider backends, kept installed so those code paths stay usable
+# if you swap a dependency in app/main.py away from the local llama.cpp default
+# (app/ingestion/vision_client.py, app/ai_matching/confirmer.py + embeddings.py).
+google-genai
+anthropic
+voyageai
+pytest

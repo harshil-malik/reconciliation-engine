@@ -32,7 +32,7 @@ def test_build_report_produces_four_sheets_with_expected_rows() -> None:
             MatchedPair(
                 bank_transaction=bank_matched,
                 ledger_transaction=ledger_matched,
-                rule="exact_amount_date",
+                rule="exact_amount_same_date",
             )
         ],
         unmatched_bank=[],
@@ -72,7 +72,7 @@ def test_build_report_produces_four_sheets_with_expected_rows() -> None:
     assert set(sheets.keys()) == {"Matched", "AI Matched", "Unmatched", "Anomalies"}
 
     assert len(sheets["Matched"]) == 1
-    assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_date"
+    assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_same_date"
     assert sheets["Matched"].iloc[0]["bank_amount"] == 1000.0
 
     assert len(sheets["AI Matched"]) == 1

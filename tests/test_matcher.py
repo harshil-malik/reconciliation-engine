@@ -33,7 +33,7 @@ def test_exact_amount_and_date_match() -> None:
     result = match([bank], [ledger])
 
     assert len(result.matched) == 1
-    assert result.matched[0].rule == "exact_amount_date"
+    assert result.matched[0].rule == "exact_amount_same_date"
     assert result.matched[0].bank_transaction.id == bank.id
     assert result.matched[0].ledger_transaction.id == ledger.id
     assert result.unmatched_bank == []
@@ -47,7 +47,9 @@ def test_matches_within_date_tolerance_window() -> None:
     result = match([bank], [ledger])
 
     assert len(result.matched) == 1
-    assert result.matched[0].rule == "exact_amount_date"
+    # Reported as a near-date match, not an exact-date one: the report is an audit
+    # document, so the rule name has to say which condition actually fired.
+    assert result.matched[0].rule == "exact_amount_near_date"
 
 
 def test_no_match_when_outside_date_tolerance() -> None:
@@ -84,7 +86,7 @@ def test_ambiguous_candidates_disambiguated_by_exact_reference() -> None:
     result = match([bank], [right_ledger, wrong_ledger])
 
     assert len(result.matched) == 1
-    assert result.matched[0].rule == "exact_amount_date_fuzzy_desc"
+    assert result.matched[0].rule == "exact_amount_same_date_fuzzy_desc"
     assert result.matched[0].similarity == 1.0
     assert result.matched[0].ledger_transaction.id == right_ledger.id
     assert result.unmatched_ledger == [wrong_ledger]
@@ -103,7 +105,7 @@ def test_ambiguous_candidates_disambiguated_by_description_similarity() -> None:
 
     assert len(result.matched) == 1
     assert result.matched[0].ledger_transaction.id == right_ledger.id
-    assert result.matched[0].rule == "exact_amount_date_fuzzy_desc"
+    assert result.matched[0].rule == "exact_amount_same_date_fuzzy_desc"
 
 
 def test_ambiguous_candidates_below_threshold_stay_unmatched() -> None:

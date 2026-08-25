@@ -33,7 +33,12 @@ def match(
             continue
 
         if len(candidates) == 1:
-            chosen, rule, similarity = candidates[0], "exact_amount_date", None
+            chosen, similarity = candidates[0], None
+            rule = (
+                "exact_amount_same_date"
+                if chosen.date == bank_txn.date
+                else "exact_amount_near_date"
+            )
         else:
             scored = sorted(
                 ((c, candidate_similarity(bank_txn, c)) for c in candidates),
@@ -44,7 +49,12 @@ def match(
             runner_up_score = scored[1][1] if len(scored) > 1 else 0.0
             if best_score < fuzzy_threshold or best_score == runner_up_score:
                 continue  # genuinely ambiguous -> leave unmatched for Stage 2
-            chosen, rule, similarity = best, "exact_amount_date_fuzzy_desc", best_score
+            chosen, similarity = best, best_score
+            rule = (
+                "exact_amount_same_date_fuzzy_desc"
+                if best.date == bank_txn.date
+                else "exact_amount_near_date_fuzzy_desc"
+            )
 
         matched.append(
             MatchedPair(

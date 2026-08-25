@@ -16,6 +16,11 @@ _COLUMN_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 _DATE_START = re.compile(r"^\s*(\d{1,2}[/-][A-Za-z0-9]{2,3}[/-]\d{2,4})")
 _AMOUNT = re.compile(r"\d[\d,]*\.\d{2}|\d[\d,]*(?=\s|$)")
+# "Opening Balance : 1,30,000.00" / "Balance B/F 1,30,000.00" and similar.
+_OPENING_BALANCE = re.compile(
+    r"(?:opening\s+balance|balance\s+b/?f|brought\s+forward)\D{0,12}([\d,]+\.\d{2})",
+    re.IGNORECASE,
+)
 
 # A numeric value may sit slightly off its header's right edge depending on how the
 # PDF was typeset, so tokens are matched to the nearest column within this many
@@ -102,6 +107,17 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
         return None
     header_index, columns = found
 
+    # The first transaction has no preceding row, so its amount cannot be checked
+    # against a balance movement — unless the statement prints an opening balance,
+    # which supplies the missing starting point. Worth hunting for: it is the
+    # difference between the first row being audited and being taken on trust.
+    opening_balance = None
+    for line in lines[:header_index]:
+        opening_match = _OPENING_BALANCE.search(line)
+        if opening_match:
+            opening_balance = opening_match.group(1)
+            break
+
     money_columns = [columns[name] for name in ("debit", "credit", "balance") if name in columns]
     if not money_columns:
         return None
@@ -171,5 +187,8 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
                 "balance": values.get("balance"),
             }
         )
+
+    if rows and opening_balance is not None:
+        rows[0]["opening_balance"] = opening_balance
 
     return rows or None

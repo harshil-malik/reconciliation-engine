@@ -97,6 +97,23 @@ def test_bank_account_ledger_mirrors_the_statement_sign_convention(tmp_path: Pat
     assert ledger[0].amount == -party[0].amount
 
 
+def test_opening_balance_lets_the_first_row_be_audited(tmp_path: Path) -> None:
+    """Without an opening balance the first row has no predecessor and rests on its
+    column position alone. With one, it is checked like every other row — here the
+    column says deposit while the balance fell, and the balance wins."""
+    rows = [
+        _row("01/08/26", "UPI-RAJESH KUMAR TRADERS", credit="12500.00", balance="117500.00"),
+        _row("02/08/26", "NEFT-AMAZON", credit="8340.00", balance="125840.00"),
+    ]
+    rows[0]["opening_balance"] = "130000.00"
+
+    transactions = _parse(rows, HDFCBankTemplate(), tmp_path)
+
+    # 130000 -> 117500 is a fall of 12500, so this was money out despite the column
+    assert transactions[0].amount == Decimal("-12500.00")
+    assert transactions[1].amount == Decimal("8340.00")
+
+
 def test_rows_without_balances_are_left_alone(tmp_path: Path) -> None:
     """A ledger with no balance column still parses — the audit is best-effort."""
     rows = [

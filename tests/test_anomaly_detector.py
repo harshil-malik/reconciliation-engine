@@ -31,8 +31,8 @@ def test_anomaly_can_be_flagged_on_an_already_matched_pair() -> None:
 
     match_result = MatchResult(
         matched=[
-            MatchedPair(bank_transaction=bank_1, ledger_transaction=ledger_1, rule="exact_amount_date"),
-            MatchedPair(bank_transaction=bank_2, ledger_transaction=ledger_2, rule="exact_amount_date"),
+            MatchedPair(bank_transaction=bank_1, ledger_transaction=ledger_1, rule="exact_amount_same_date"),
+            MatchedPair(bank_transaction=bank_2, ledger_transaction=ledger_2, rule="exact_amount_same_date"),
         ],
         unmatched_bank=[],
         unmatched_ledger=[],
@@ -69,7 +69,7 @@ def test_bank_and_ledger_duplicates_are_not_cross_matched() -> None:
 
     match_result = MatchResult(
         matched=[
-            MatchedPair(bank_transaction=bank_1, ledger_transaction=ledger_1, rule="exact_amount_date")
+            MatchedPair(bank_transaction=bank_1, ledger_transaction=ledger_1, rule="exact_amount_same_date")
         ],
         unmatched_bank=[bank_2],
         unmatched_ledger=[],

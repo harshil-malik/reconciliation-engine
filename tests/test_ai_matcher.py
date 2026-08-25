@@ -31,7 +31,7 @@ class _FakeConfirmer:
         )
 
 
-def _txn(*, source: str, amount: str, day: int, description: str = "x") -> Transaction:
+def _txn(*, source: str, amount: str, day: int, description: str = "ACME Supplies") -> Transaction:
     return Transaction(
         date=date(2024, 4, day),
         amount=Decimal(amount),
@@ -166,6 +166,96 @@ def test_high_confidence_matches_even_when_is_match_flag_is_false() -> None:
     assert result.ai_matched[0].confidence == 0.8
 
 
+def test_row_with_no_narration_is_never_ai_matched() -> None:
+    """A row with no payee and no reference carries no evidence of WHO it was with,
+    so any match would rest on amount and date alone. Observed live: a local 3B
+    matched two such rows at 0.8 confidence, claiming amounts were "the same" when
+    they differed by thousands."""
+    from app.schema import NO_NARRATION
+
+    bank_txn = _txn(source="bank", amount="-12500", day=9, description=NO_NARRATION)
+    ledger_txn = _txn(source="ledger", amount="-12500", day=9, description="Amazon Marketplace")
+
+    vectors = {
+        _embedding_text(bank_txn): [1.0, 0.0],
+        _embedding_text(ledger_txn): [1.0, 0.0],
+    }
+    confirmer = _FakeConfirmer(
+        {
+            (bank_txn.id, ledger_txn.id): ConfirmationResult(
+                is_match=True, confidence=0.95, reasoning="looks the same"
+            )
+        }
+    )
+
+    result = match_with_ai(
+        MatchResult(matched=[], unmatched_bank=[bank_txn], unmatched_ledger=[ledger_txn]),
+        embedding_client=_FixedEmbeddingClient(vectors),
+        confirmer=confirmer,
+        similarity_threshold=0.0,
+    )
+
+    assert result.ai_matched == []
+    assert confirmer.calls == []  # never even asked
+
+
+def test_amount_gap_too_large_for_a_bank_fee_is_rejected() -> None:
+    """Stage 2 recovers fee/rounding/lag differences, not arbitrary amounts. A 33%
+    gap is not a bank fee however alike the descriptions look."""
+    bank_txn = _txn(source="bank", amount="-12500", day=9, description="NEFT ACME Supplies")
+    ledger_txn = _txn(source="ledger", amount="-8340", day=2, description="ACME Supplies invoice")
+
+    vectors = {
+        _embedding_text(bank_txn): [1.0, 0.0],
+        _embedding_text(ledger_txn): [1.0, 0.0],
+    }
+    confirmer = _FakeConfirmer(
+        {
+            (bank_txn.id, ledger_txn.id): ConfirmationResult(
+                is_match=True, confidence=0.9, reasoning="same amount"
+            )
+        }
+    )
+
+    result = match_with_ai(
+        MatchResult(matched=[], unmatched_bank=[bank_txn], unmatched_ledger=[ledger_txn]),
+        embedding_client=_FixedEmbeddingClient(vectors),
+        confirmer=confirmer,
+        similarity_threshold=0.0,
+    )
+
+    assert result.ai_matched == []
+    assert confirmer.calls == []
+
+
+def test_small_bank_fee_gap_still_reaches_the_model() -> None:
+    """The guard must not swallow the case Stage 2 exists for."""
+    bank_txn = _txn(source="bank", amount="-33050", day=21, description="RTGS MAHESH ELECTRICALS")
+    ledger_txn = _txn(source="ledger", amount="-33000", day=21, description="Mahesh Elec purchase")
+
+    vectors = {
+        _embedding_text(bank_txn): [1.0, 0.0],
+        _embedding_text(ledger_txn): [1.0, 0.0],
+    }
+    confirmer = _FakeConfirmer(
+        {
+            (bank_txn.id, ledger_txn.id): ConfirmationResult(
+                is_match=True, confidence=0.8, reasoning="same payee, 50 rupee fee"
+            )
+        }
+    )
+
+    result = match_with_ai(
+        MatchResult(matched=[], unmatched_bank=[bank_txn], unmatched_ledger=[ledger_txn]),
+        embedding_client=_FixedEmbeddingClient(vectors),
+        confirmer=confirmer,
+        similarity_threshold=0.0,
+    )
+
+    assert len(result.ai_matched) == 1
+    assert confirmer.calls == [(bank_txn.id, ledger_txn.id)]
+
+
 def test_confirmer_failure_on_one_pair_leaves_it_unmatched_without_crashing() -> None:
     bank_txn = _txn(source="bank", amount="998", day=1, description="NEFT vendor")
     ledger_txn = _txn(source="ledger", amount="1000", day=1, description="Vendor payment")
@@ -215,8 +305,8 @@ def test_shortlist_failure_leaves_everything_unmatched_without_crashing() -> Non
 
 def test_conflicting_confirmations_resolved_by_highest_confidence() -> None:
     bank_txn = _txn(source="bank", amount="1000", day=1)
-    ledger_1 = _txn(source="ledger", amount="1000", day=1, description="a")
-    ledger_2 = _txn(source="ledger", amount="1000", day=1, description="b")
+    ledger_1 = _txn(source="ledger", amount="1000", day=1, description="ACME Supplies north")
+    ledger_2 = _txn(source="ledger", amount="1000", day=1, description="ACME Supplies south")
 
     vectors = {
         _embedding_text(bank_txn): [1.0, 0.0],

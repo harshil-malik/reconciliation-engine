@@ -6,11 +6,21 @@ from pydantic import BaseModel
 
 from app.schema import Transaction
 
-# exact_amount_date: amount matched exactly and dates fell within tolerance, with no
-# other candidate to disambiguate from.
-# exact_amount_date_fuzzy_desc: multiple same-amount/same-date candidates existed;
-# reference or description similarity broke the tie.
-MatchRule = Literal["exact_amount_date", "exact_amount_date_fuzzy_desc"]
+# The rule name goes into the audit report, so it states what actually fired rather
+# than lumping the date cases together — a pair dated a day apart reported as
+# "exact_amount_date" reads as an exact-date match to whoever reviews the workbook.
+#
+# exact_amount_same_date: amounts equal and both sides dated the same day.
+# exact_amount_near_date:  amounts equal, dates differ but fall inside the tolerance
+#                          window (bank clearing lag vs ledger entry date).
+# ..._fuzzy_desc variants: several candidates shared amount and date, and reference
+#                          or description similarity broke the tie.
+MatchRule = Literal[
+    "exact_amount_same_date",
+    "exact_amount_near_date",
+    "exact_amount_same_date_fuzzy_desc",
+    "exact_amount_near_date_fuzzy_desc",
+]
 
 
 class MatchedPair(BaseModel):

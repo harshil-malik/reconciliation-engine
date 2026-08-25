@@ -83,7 +83,28 @@ def _reconcile_against_balances(
     corrected = list(amounts)
     corrections: list[str] = []
 
-    for i in range(1, len(rows)):
+    # An opening balance, when the statement prints one, gives the first row the
+    # predecessor it otherwise lacks — so row 1 gets audited like every other row
+    # instead of being taken on trust from its column position alone.
+    opening = _parse_balance(rows[0].get("opening_balance")) if rows else None
+    start_index = 1
+    if opening is not None:
+        balances = [opening, *balances]
+        rows = [{"date": "opening", "description": "opening balance"}, *rows]
+        corrected = [Decimal("0"), *corrected]
+        amounts = [Decimal("0"), *amounts]
+    elif rows and balances[0] is not None:
+        logger.warning(
+            "%s prints no opening balance, so the first row (%s %r, %s) cannot be "
+            "checked against a balance movement and rests on its column position "
+            "alone — verify it against the statement",
+            file_name,
+            rows[0].get("date"),
+            str(rows[0].get("description"))[:40],
+            amounts[0],
+        )
+
+    for i in range(start_index, len(rows)):
         previous, current = balances[i - 1], balances[i]
         if previous is None or current is None:
             continue
@@ -133,7 +154,8 @@ def _reconcile_against_balances(
             file_name,
             "; ".join(corrections),
         )
-    return corrected
+    # Drop the synthetic opening-balance row added above, if any.
+    return corrected[1:] if opening is not None else corrected
 
 
 def parse_pdf(

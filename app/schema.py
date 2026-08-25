@@ -7,6 +7,12 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+# Used when a statement prints an amount with no narration at all, so the report can
+# distinguish "the document said nothing here" from "extraction lost the text".
+# Shared because Stage 2 must recognise it: a row with this description carries no
+# counterparty evidence and must never be matched on amount and date alone.
+NO_NARRATION = "(no narration)"
+
 
 class Transaction(BaseModel):
     """Canonical transaction record.

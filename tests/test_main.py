@@ -138,7 +138,7 @@ def test_reconcile_runs_full_pipeline_and_returns_report() -> None:
 
     # row 1 (₹15,075, same date both sides) clears Stage 1 deterministically
     assert len(sheets["Matched"]) == 1
-    assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_date"
+    assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_same_date"
 
     # row 2 (₹998 bank vs ₹1000 ledger) fails Stage 1's exact-amount rule and is
     # picked up by the AI net via the overridden fake embedding/confirmer clients
@@ -181,4 +181,4 @@ def test_reconcile_accepts_pdf_ledger_with_generic_ledger_template() -> None:
     assert response.status_code == 200
     sheets = pd.read_excel(io.BytesIO(response.content), sheet_name=None)
     assert len(sheets["Matched"]) == 1
-    assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_date"
+    assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_same_date"

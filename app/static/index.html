@@ -4,6 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Reconciliation Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" />
 <style>
   :root {
     --bg: #f6f7f9;
@@ -13,9 +15,18 @@
     --text: #1b1f23;
     --text-muted: #5b6470;
     --accent: #2f6f5e;
-    --accent-dark: #244f43;
+    --accent-dark: #1c4a3d;
+    --accent-tint: #eaf3f0;
+    --deep: #14322a;
+    --deep-line: #2a4d43;
+    --on-deep: #f4f7f5;
+    --on-deep-muted: #9fb8ae;
     --error-bg: #fdecec;
     --error-text: #9c2b2b;
+    --error-border: #e4a9a9;
+    --warning-bg: #fdf3e2;
+    --warning-text: #8a5a12;
+    --warning-border: #e3b673;
     --success-bg: #eaf7ef;
     --success-text: #1e6b3c;
   }
@@ -26,45 +37,63 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  a { color: var(--accent); }
+  a:hover { color: var(--accent-dark); }
+  button { font-family: inherit; cursor: pointer; }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  /* ---------- upload view ---------- */
+
+  #upload-view {
     display: flex;
     justify-content: center;
-    padding: 48px 20px;
+    padding: 64px 20px;
   }
 
-  main {
+  #upload-view main {
     width: 100%;
-    max-width: 760px;
+    max-width: 780px;
   }
 
-  header {
-    margin-bottom: 32px;
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
   }
 
   h1 {
-    font-size: 26px;
-    margin: 0 0 6px;
-    letter-spacing: -0.01em;
+    font-size: 34px;
+    margin: 0 0 8px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
   }
 
-  header p {
+  #upload-view header p {
     margin: 0;
     color: var(--text-muted);
     font-size: 15px;
+    max-width: 520px;
   }
 
   .dropzones {
     display: flex;
     gap: 16px;
     flex-wrap: wrap;
+    margin-top: 36px;
   }
 
   .dropzone {
     flex: 1 1 300px;
     background: var(--surface);
-    border: 2px dashed var(--border);
-    border-radius: 12px;
-    padding: 28px 20px;
+    border: 1.5px dashed var(--border);
+    border-radius: 16px;
+    padding: 26px 20px;
     text-align: center;
     cursor: pointer;
     transition: border-color 0.15s ease, background 0.15s ease;
@@ -73,7 +102,7 @@
   .dropzone:hover,
   .dropzone.dragover {
     border-color: var(--border-hover);
-    background: #f2f8f6;
+    background: var(--accent-tint);
   }
 
   .dropzone.has-file {
@@ -83,7 +112,7 @@
 
   .dropzone h2 {
     font-size: 15px;
-    margin: 0 0 6px;
+    margin: 8px 0 6px;
     font-weight: 600;
   }
 
@@ -94,16 +123,14 @@
   }
 
   .dropzone .filename {
-    margin-top: 10px;
-    font-size: 13px;
-    font-weight: 600;
+    margin-top: 12px;
+    font-size: 12px;
+    font-weight: 500;
     color: var(--accent-dark);
     word-break: break-all;
   }
 
-  .dropzone input[type="file"] {
-    display: none;
-  }
+  .dropzone input[type="file"] { display: none; }
 
   .template-row {
     margin-top: 16px;
@@ -112,126 +139,386 @@
     gap: 10px;
   }
 
-  .template-row.visible {
-    display: flex;
-  }
+  .template-row.visible { display: flex; }
 
   .template-row label {
-    font-size: 13px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     color: var(--text-muted);
   }
 
   .template-row select {
     flex: 1;
-    padding: 8px 10px;
-    border-radius: 8px;
+    padding: 9px 12px;
+    border-radius: 10px;
     border: 1px solid var(--border);
     font-size: 14px;
     background: var(--surface);
+    font-family: inherit;
   }
 
   .actions {
-    margin-top: 28px;
+    margin-top: 32px;
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 18px;
   }
 
-  button#reconcile {
+  .btn-pill {
     background: var(--accent);
     color: white;
     border: none;
-    border-radius: 8px;
-    padding: 12px 22px;
+    border-radius: 999px;
+    padding: 13px 28px;
     font-size: 15px;
     font-weight: 600;
-    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     transition: background 0.15s ease;
   }
 
-  button#reconcile:disabled {
+  .btn-pill:disabled {
     background: #b7c2bd;
     cursor: not-allowed;
   }
 
-  button#reconcile:not(:disabled):hover {
-    background: var(--accent-dark);
+  .btn-pill:not(:disabled):hover { background: var(--accent-dark); }
+
+  .btn-pill.small {
+    padding: 11px 22px;
+    font-size: 13px;
   }
 
-  .status {
-    font-size: 14px;
-  }
+  .status { font-size: 13px; }
+  .status.error { color: var(--error-text); background: var(--error-bg); padding: 10px 14px; border-radius: 8px; display: inline-block; }
+  .status.success { color: var(--success-text); background: var(--success-bg); padding: 10px 14px; border-radius: 8px; display: inline-block; }
+  .status.loading { color: var(--text-muted); }
 
-  .status.error {
-    color: var(--error-text);
-    background: var(--error-bg);
-    padding: 10px 14px;
-    border-radius: 8px;
-    display: inline-block;
-  }
-
-  .status.success {
-    color: var(--success-text);
-    background: var(--success-bg);
-    padding: 10px 14px;
-    border-radius: 8px;
-    display: inline-block;
-  }
-
-  .status.loading {
-    color: var(--text-muted);
-  }
-
-  footer {
-    margin-top: 40px;
+  #upload-view footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
     font-size: 12px;
     color: var(--text-muted);
   }
+
+  /* ---------- results view ---------- */
+
+  #results-view { display: none; padding-bottom: 64px; }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    background: none;
+    border: none;
+    color: var(--accent);
+    padding: 0;
+  }
+
+  .results-header {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 32px 20px 0;
+  }
+
+  .results-header .titles {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 18px;
+  }
+
+  .results-header h1 { font-size: 26px; margin: 0; }
+  .results-header .files { font-size: 12px; color: var(--text-muted); }
+
+  .proof-band {
+    background: var(--deep);
+    margin-top: 20px;
+  }
+
+  .proof-inner {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 32px 20px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1.4fr;
+    gap: 24px;
+    align-items: center;
+  }
+
+  .proof-label {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--on-deep-muted);
+    margin-bottom: 8px;
+  }
+
+  .proof-value { font-size: 22px; font-weight: 600; color: var(--on-deep); }
+  .proof-sub { font-size: 12px; color: var(--on-deep-muted); margin-top: 2px; }
+
+  .unexplained-cell {
+    border-left: 1px solid var(--deep-line);
+    padding-left: 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .unexplained-value {
+    font-size: 34px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  .tabs-row {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    margin-top: 8px;
+  }
+
+  .tabs { display: flex; gap: 32px; }
+
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 14px 0;
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tab-btn.active { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
+
+  .tab-badge {
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--text-muted);
+  }
+
+  .tab-btn.active .tab-badge { background: var(--accent-tint); color: var(--accent-dark); }
+
+  .tab-panel { max-width: 1280px; margin: 20px auto 0; padding: 0 20px; display: none; }
+  .tab-panel.active { display: block; }
+
+  .pair-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+  }
+
+  .pair-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 130px 210px;
+    gap: 12px;
+    font-size: 13px;
+    align-items: center;
+  }
+
+  .pair-row.bank { padding-bottom: 10px; }
+  .pair-row.ledger { padding-top: 10px; border-top: 1px dashed var(--border); }
+
+  .side-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-right: 8px;
+  }
+
+  .side-tag.bank { color: var(--accent-dark); background: var(--accent-tint); }
+  .side-tag.ledger { color: var(--text-muted); background: var(--bg); }
+
+  .reasoning {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    margin-top: 2px;
+  }
+
+  .unmatched-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+  .unmatched-col-label {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .unmatched-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+  }
+
+  .unmatched-card .top-row { display: flex; justify-content: space-between; font-size: 13px; }
+  .unmatched-card .desc { font-size: 13px; margin: 4px 0 6px; }
+  .unmatched-card .reason { font-size: 12px; color: var(--text-muted); }
+
+  .anomaly-card {
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+    border: 1px solid;
+    border-left-width: 4px;
+  }
+
+  .anomaly-card.severity-red { background: var(--error-bg); border-color: var(--error-border); border-left-color: var(--error-text); }
+  .anomaly-card.severity-amber { background: var(--warning-bg); border-color: var(--warning-border); border-left-color: var(--warning-text); }
+
+  .anomaly-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .anomaly-rule { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 500; }
+  .severity-red .anomaly-rule { color: var(--error-text); }
+  .severity-amber .anomaly-rule { color: var(--warning-text); }
+  .anomaly-amount { font-size: 13px; font-weight: 600; }
+  .anomaly-reason { font-size: 13px; }
+
+  .empty-state { font-size: 13px; color: var(--text-muted); padding: 24px 0; }
 </style>
 </head>
 <body>
-<main>
-  <header>
-    <h1>Reconciliation Engine</h1>
-    <p>Drop your bank statement and internal ledger below to generate an audit-ready reconciliation report.</p>
-  </header>
 
-  <div class="dropzones">
-    <div class="dropzone" id="bank-zone" data-role="bank">
-      <h2>Bank Statement</h2>
-      <div class="hint">CSV, Excel, or PDF<br />Drop file or click to browse</div>
-      <div class="filename" id="bank-filename"></div>
-      <input type="file" id="bank-input" accept=".csv,.xlsx,.xls,.pdf" />
+<div id="upload-view">
+  <main>
+    <header>
+      <div class="eyebrow">Step 1 — Ingest</div>
+      <h1>Reconciliation Engine</h1>
+      <p>Drop your bank statement and internal ledger below to generate an audit-ready reconciliation report.</p>
+    </header>
+
+    <div class="dropzones">
+      <div class="dropzone" id="bank-zone" data-role="bank">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="margin: 0 auto; display: block;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#5b6470" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M14 2v6h6" stroke="#5b6470" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+        <h2>Bank Statement</h2>
+        <div class="hint">CSV, Excel, or PDF<br />Drop file or click to browse</div>
+        <div class="filename" id="bank-filename"></div>
+        <input type="file" id="bank-input" accept=".csv,.xlsx,.xls,.pdf" />
+      </div>
+
+      <div class="dropzone" id="ledger-zone" data-role="ledger">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="margin: 0 auto; display: block;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#5b6470" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M14 2v6h6" stroke="#5b6470" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+        <h2>Internal Ledger</h2>
+        <div class="hint">CSV, Excel, or PDF<br />Drop file or click to browse</div>
+        <div class="filename" id="ledger-filename"></div>
+        <input type="file" id="ledger-input" accept=".csv,.xlsx,.xls,.pdf" />
+      </div>
     </div>
 
-    <div class="dropzone" id="ledger-zone" data-role="ledger">
-      <h2>Internal Ledger</h2>
-      <div class="hint">CSV, Excel, or PDF<br />Drop file or click to browse</div>
-      <div class="filename" id="ledger-filename"></div>
-      <input type="file" id="ledger-input" accept=".csv,.xlsx,.xls,.pdf" />
+    <div class="template-row" id="bank-template-row">
+      <label for="bank-template-select">Bank template</label>
+      <select id="bank-template-select"></select>
+    </div>
+
+    <div class="template-row" id="ledger-template-row">
+      <label for="ledger-template-select">Ledger template</label>
+      <select id="ledger-template-select"></select>
+    </div>
+
+    <div class="actions">
+      <button class="btn-pill" id="reconcile" disabled>Generate Report</button>
+      <div class="status" id="status"></div>
+    </div>
+
+    <footer>Runs entirely on this machine — no data leaves it. Results appear here and export as a seven-tab .xlsx workbook.</footer>
+  </main>
+</div>
+
+<div id="results-view">
+  <div class="results-header">
+    <button class="back-link" id="new-reconciliation">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      New reconciliation
+    </button>
+    <div class="titles">
+      <h1>Reconciliation Results</h1>
+      <div class="files mono" id="results-filenames"></div>
     </div>
   </div>
 
-  <div class="template-row" id="bank-template-row">
-    <label for="bank-template-select">Bank template (required for PDF)</label>
-    <select id="bank-template-select"></select>
+  <div class="proof-band">
+    <div class="proof-inner">
+      <div>
+        <div class="proof-label">Bank transactions</div>
+        <div class="proof-value" id="stat-bank-total"></div>
+        <div class="proof-sub" id="stat-bank-count"></div>
+      </div>
+      <div>
+        <div class="proof-label">Ledger transactions</div>
+        <div class="proof-value" id="stat-ledger-total"></div>
+        <div class="proof-sub" id="stat-ledger-count"></div>
+      </div>
+      <div>
+        <div class="proof-label">Difference</div>
+        <div class="proof-value" id="stat-difference"></div>
+        <div class="proof-sub">bank net less ledger net</div>
+      </div>
+      <div class="unexplained-cell">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" style="flex-shrink: 0;" id="unexplained-icon">
+          <circle cx="12" cy="12" r="10" stroke="#7fcf9f" stroke-width="1.8"/>
+          <path d="M8 12.5l2.5 2.5L16 9.5" stroke="#7fcf9f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div>
+          <div class="proof-label">Unexplained</div>
+          <div class="unexplained-value mono" id="stat-unexplained"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="template-row" id="ledger-template-row">
-    <label for="ledger-template-select">Ledger template (required for PDF)</label>
-    <select id="ledger-template-select"></select>
+  <div class="tabs-row">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="matched">Matched <span class="tab-badge mono" id="badge-matched">0</span></button>
+      <button class="tab-btn" data-tab="review">Needs Review <span class="tab-badge mono" id="badge-review">0</span></button>
+      <button class="tab-btn" data-tab="ai">AI Matched <span class="tab-badge mono" id="badge-ai">0</span></button>
+      <button class="tab-btn" data-tab="unmatched">Unmatched <span class="tab-badge mono" id="badge-unmatched">0</span></button>
+      <button class="tab-btn" data-tab="anomalies">Anomalies <span class="tab-badge mono" id="badge-anomalies">0</span></button>
+    </div>
+    <button class="btn-pill small" id="download-xlsx">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v13m0 0l-5-5m5 5l5-5M4 20h16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Download .xlsx
+    </button>
   </div>
 
-  <div class="actions">
-    <button id="reconcile" disabled>Generate Report</button>
-    <div class="status" id="status"></div>
-  </div>
-
-  <footer>Matched / AI-Matched / Unmatched / Anomalies — exported as one .xlsx workbook.</footer>
-</main>
+  <div class="tab-panel active" id="panel-matched"></div>
+  <div class="tab-panel" id="panel-review"></div>
+  <div class="tab-panel" id="panel-ai"></div>
+  <div class="tab-panel" id="panel-unmatched"></div>
+  <div class="tab-panel" id="panel-anomalies"></div>
+</div>
 
 <script>
-  const state = { bank: null, ledger: null, bankTemplate: null, ledgerTemplate: null };
+  const state = { bank: null, ledger: null, bankTemplate: null, ledgerTemplate: null, result: null };
 
   const bankZone = document.getElementById("bank-zone");
   const ledgerZone = document.getElementById("ledger-zone");
@@ -352,6 +639,231 @@
   loadTemplates("/bank-templates", bankTemplateSelect, "Select a bank…");
   loadTemplates("/ledger-templates", ledgerTemplateSelect, "Select a ledger format…");
 
+  // ---------- formatting helpers ----------
+
+  const money = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  function fmtAmount(n) {
+    const sign = n < 0 ? "−" : "";
+    return `${sign}₹${money.format(Math.abs(n))}`;
+  }
+
+  const RULE_LABELS = {
+    exact_amount_same_date: "Exact · Same Date",
+    exact_amount_near_date: "Exact · Near Date",
+    exact_amount_same_date_fuzzy_desc: "Exact · Same Date · Fuzzy Desc",
+    exact_amount_near_date_fuzzy_desc: "Exact · Near Date · Fuzzy Desc",
+    near_amount_matching_description: "Near Amount · Matching Desc",
+  };
+
+  const ANOMALY_LABELS = {
+    duplicate_payment: "Duplicate Payment",
+    just_below_approval_threshold: "Threshold Avoidance",
+    round_number_entry: "Round Number Entry",
+    reversed_mirrored_entry: "Reversed Entry",
+    unusual_timing_gap: "Unusual Timing Gap",
+  };
+
+  const ANOMALY_SEVERITY = {
+    duplicate_payment: "red",
+    just_below_approval_threshold: "red",
+    reversed_mirrored_entry: "red",
+    round_number_entry: "amber",
+    unusual_timing_gap: "amber",
+  };
+
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+  }
+
+  // ---------- results rendering ----------
+
+  function renderMatched(pairs) {
+    if (!pairs.length) return `<div class="empty-state">No deterministic matches.</div>`;
+    return pairs.map((pair) => `
+      <div class="pair-card">
+        <div class="pair-row bank">
+          <div>${pair.bank.date}</div>
+          <div><span class="side-tag bank mono">BANK</span>${escapeHtml(pair.bank.description)}</div>
+          <div style="text-align:right; font-weight:600;">${fmtAmount(pair.bank.amount)}</div>
+          <div class="mono" style="font-size:11px; color:var(--text-muted); text-align:right; text-transform:uppercase; letter-spacing:0.03em;">${RULE_LABELS[pair.rule] || pair.rule}</div>
+        </div>
+        <div class="pair-row ledger">
+          <div>${pair.ledger.date}</div>
+          <div><span class="side-tag ledger mono">LEDGER</span>${escapeHtml(pair.ledger.description)}</div>
+          <div style="text-align:right; font-weight:600;">${fmtAmount(pair.ledger.amount)}</div>
+          <div></div>
+        </div>
+        ${pair.issue ? `<div class="reasoning">${escapeHtml(pair.issue)}</div>` : ""}
+      </div>
+    `).join("");
+  }
+
+  // The workbook splits review by reason (Review - Amount / Date / Weak Evidence)
+  // because reviewing amount differences is a different job from reviewing timing
+  // differences. The screen mirrors that grouping so the two do not disagree.
+  const REVIEW_GROUPS = [
+    { key: "amount", label: "Amounts disagree",
+      hint: "The two sides record different figures — a fee, a rounding, or an error.",
+      test: (p) => p.bank.amount !== p.ledger.amount },
+    { key: "date", label: "Booked on different dates",
+      hint: "Same figure, different day — usually bank clearing lag.",
+      test: (p) => p.bank.date !== p.ledger.date },
+    { key: "weak", label: "Matched on figures alone",
+      hint: "No shared reference or payee ties these together, so two unrelated payments of the same size on the same day would look identical.",
+      test: (p) => p.corroboration === "amount_and_date_only" },
+  ];
+
+  // A pairing failing on more than one count appears under EVERY reason it fails,
+  // not just a primary one — otherwise someone reviewing all the date differences
+  // would not see it, and would reasonably conclude there were none.
+  function reviewPairs(matched) {
+    return matched.filter((p) => REVIEW_GROUPS.some((g) => g.test(p)));
+  }
+
+  function renderReview(matched) {
+    const groups = REVIEW_GROUPS
+      .map((g) => ({ ...g, pairs: matched.filter(g.test) }))
+      .filter((g) => g.pairs.length);
+
+    if (!groups.length) {
+      return `<div class="empty-state">Nothing needs review — every pairing agrees on amount and date, and is backed by a shared reference or payee.</div>`;
+    }
+    return groups.map((g) => `
+      <div style="margin-bottom: 28px;">
+        <div class="unmatched-col-label mono">${g.label} · ${g.pairs.length}</div>
+        <div style="font-size:12px; color:var(--text-muted); margin:-4px 0 10px;">${g.hint}</div>
+        ${renderMatched(g.pairs)}
+      </div>
+    `).join("");
+  }
+
+  function renderAiMatched(pairs) {
+    if (!pairs.length) return `<div class="empty-state">No AI-confirmed matches.</div>`;
+    return pairs.map((pair) => `
+      <div class="pair-card">
+        <div class="pair-row bank" style="grid-template-columns: 90px 1fr 130px 90px;">
+          <div>${pair.bank.date}</div>
+          <div><span class="side-tag bank mono">BANK</span>${escapeHtml(pair.bank.description)}</div>
+          <div style="text-align:right; font-weight:600;">${fmtAmount(pair.bank.amount)}</div>
+          <div class="mono" style="font-size:12px; text-align:right; color:var(--accent-dark); font-weight:500;">${Math.round(pair.confidence * 100)}% conf.</div>
+        </div>
+        <div class="pair-row ledger" style="grid-template-columns: 90px 1fr 130px 90px;">
+          <div>${pair.ledger.date}</div>
+          <div><span class="side-tag ledger mono">LEDGER</span>${escapeHtml(pair.ledger.description)}</div>
+          <div style="text-align:right; font-weight:600;">${fmtAmount(pair.ledger.amount)}</div>
+          <div></div>
+        </div>
+        <div class="reasoning">"${escapeHtml(pair.reasoning)}"</div>
+      </div>
+    `).join("");
+  }
+
+  function renderUnmatchedCol(label, txns) {
+    const body = txns.length
+      ? txns.map((txn) => `
+          <div class="unmatched-card">
+            <div class="top-row"><span style="color:var(--text-muted);">${txn.date}</span><span style="font-weight:600;">${fmtAmount(txn.amount)}</span></div>
+            <div class="desc">${escapeHtml(txn.description)}</div>
+            <div class="reason">${escapeHtml(txn.reason)}</div>
+          </div>
+        `).join("")
+      : `<div class="empty-state">None.</div>`;
+    return `<div><div class="unmatched-col-label mono">${label} · ${txns.length}</div>${body}</div>`;
+  }
+
+  function renderUnmatched(bankOnly, ledgerOnly) {
+    return `<div class="unmatched-grid">
+      ${renderUnmatchedCol("Bank only", bankOnly)}
+      ${renderUnmatchedCol("Ledger only", ledgerOnly)}
+    </div>`;
+  }
+
+  function renderAnomalies(flags) {
+    if (!flags.length) return `<div class="empty-state">No anomalies flagged.</div>`;
+    return flags.map((flag) => {
+      const severity = ANOMALY_SEVERITY[flag.rule] || "amber";
+      const total = flag.transactions.reduce((sum, t) => sum + t.amount, 0);
+      const countSuffix = flag.transactions.length > 1 ? ` × ${flag.transactions.length}` : "";
+      return `
+        <div class="anomaly-card severity-${severity}">
+          <div class="anomaly-top">
+            <span class="anomaly-rule mono">${ANOMALY_LABELS[flag.rule] || flag.rule}</span>
+            <span class="anomaly-amount">${fmtAmount(total)}${countSuffix}</span>
+          </div>
+          <div class="anomaly-reason">${escapeHtml(flag.reason)}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderResults(data) {
+    state.result = data;
+
+    document.getElementById("results-filenames").textContent =
+      `${state.bank.name} → ${state.ledger.name}`;
+
+    document.getElementById("stat-bank-total").textContent = fmtAmount(data.summary.bank_total);
+    document.getElementById("stat-bank-count").textContent = `${data.summary.bank_count} rows`;
+    document.getElementById("stat-ledger-total").textContent = fmtAmount(data.summary.ledger_total);
+    document.getElementById("stat-ledger-count").textContent = `${data.summary.ledger_count} rows`;
+    document.getElementById("stat-difference").textContent = fmtAmount(data.summary.difference);
+
+    const unexplainedEl = document.getElementById("stat-unexplained");
+    const iconEl = document.getElementById("unexplained-icon");
+    const isBalanced = Math.abs(data.summary.unexplained) < 0.005;
+    unexplainedEl.textContent = fmtAmount(data.summary.unexplained);
+    unexplainedEl.style.color = isBalanced ? "#eafff3" : "#ffb4a8";
+    iconEl.querySelectorAll("circle, path").forEach((el) => el.setAttribute("stroke", isBalanced ? "#7fcf9f" : "#ff8a75"));
+
+    document.getElementById("badge-matched").textContent = data.matched.length;
+    document.getElementById("badge-review").textContent = reviewPairs(data.matched).length;
+    document.getElementById("badge-ai").textContent = data.ai_matched.length;
+    document.getElementById("badge-unmatched").textContent = data.unmatched_bank.length + data.unmatched_ledger.length;
+    document.getElementById("badge-anomalies").textContent = data.anomalies.length;
+
+    document.getElementById("panel-matched").innerHTML = renderMatched(data.matched);
+    document.getElementById("panel-review").innerHTML = renderReview(data.matched);
+    document.getElementById("panel-ai").innerHTML = renderAiMatched(data.ai_matched);
+    document.getElementById("panel-unmatched").innerHTML = renderUnmatched(data.unmatched_bank, data.unmatched_ledger);
+    document.getElementById("panel-anomalies").innerHTML = renderAnomalies(data.anomalies);
+
+    document.getElementById("upload-view").style.display = "none";
+    document.getElementById("results-view").style.display = "block";
+  }
+
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
+    });
+  });
+
+  document.getElementById("download-xlsx").addEventListener("click", () => {
+    if (!state.result) return;
+    const bytes = atob(state.result.report_base64);
+    const buffer = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "reconciliation_report.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById("new-reconciliation").addEventListener("click", () => {
+    document.getElementById("results-view").style.display = "none";
+    document.getElementById("upload-view").style.display = "flex";
+  });
+
   reconcileBtn.addEventListener("click", async () => {
     const formData = new FormData();
     formData.append("bank_file", state.bank);
@@ -363,7 +875,7 @@
     setStatus("loading", "Reconciling — this can take a minute…");
 
     try {
-      const response = await fetch("/reconcile", { method: "POST", body: formData });
+      const response = await fetch("/reconcile/preview", { method: "POST", body: formData });
       if (!response.ok) {
         let message = `Request failed (${response.status})`;
         try {
@@ -372,16 +884,9 @@
         } catch (_) {}
         throw new Error(message);
       }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "reconciliation_report.xlsx";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      setStatus("success", "Report downloaded ✓");
+      const data = await response.json();
+      setStatus("");
+      renderResults(data);
     } catch (err) {
       setStatus("error", err.message);
     } finally {

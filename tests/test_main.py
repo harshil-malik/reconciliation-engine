@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import json
 
@@ -152,6 +153,52 @@ def test_reconcile_runs_full_pipeline_and_returns_report() -> None:
 
     assert len(sheets["AI Matched"]) == 0
     assert len(sheets["Unmatched - Bank"]) == 0
+
+
+def test_reconcile_preview_returns_json_matching_the_report() -> None:
+    bank_csv = (
+        b"Date,Narration,Chq/Ref No,Withdrawal Amt,Deposit Amt\n"
+        b"01/04/24,NEFT VENDOR PAYMENT,N123,15075.00,\n"
+        b"05/04/24,NEFT CONSULTING FEE,,998.00,\n"
+    )
+    ledger_csv = (
+        b"Txn Date,Particulars,Voucher No,Amount\n"
+        b"01-04-2024,Vendor Payment - ABC,N123,-15075\n"
+        b"05-04-2024,Consulting Fee Payment,,-1000\n"
+    )
+
+    app.dependency_overrides[get_embedding_client] = lambda: _AllMatchEmbeddingClient()
+    app.dependency_overrides[get_match_confirmer] = lambda: _AllConfirmConfirmer()
+
+    response = client.post(
+        "/reconcile/preview",
+        files={
+            "bank_file": ("bank.csv", bank_csv, "text/csv"),
+            "ledger_file": ("ledger.csv", ledger_csv, "text/csv"),
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["summary"]["bank_count"] == 2
+    assert body["summary"]["ledger_count"] == 2
+    assert body["summary"]["unexplained"] == 0.0
+
+    assert len(body["matched"]) == 2
+    rules = {pair["rule"] for pair in body["matched"]}
+    assert "exact_amount_same_date" in rules
+    assert "near_amount_matching_description" in rules
+
+    assert body["ai_matched"] == []
+    assert body["unmatched_bank"] == []
+    assert body["unmatched_ledger"] == []
+
+    # The embedded workbook is the same bytes /reconcile would have streamed, so the
+    # dashboard's "Download .xlsx" button never has to re-run the pipeline.
+    report_bytes = base64.b64decode(body["report_base64"])
+    sheets = pd.read_excel(io.BytesIO(report_bytes), sheet_name=None)
+    assert len(sheets["Matched"]) == 2
 
 
 def test_reconcile_accepts_pdf_ledger_with_generic_ledger_template() -> None:

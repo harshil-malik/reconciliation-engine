@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import logging
 import tempfile
@@ -20,7 +21,9 @@ load_dotenv()
 from app.ai_matching.confirmer import LocalMatchConfirmer, MatchConfirmer
 from app.ai_matching.embeddings import EmbeddingClient, LocalEmbeddingClient
 from app.ai_matching.matcher import match_with_ai
+from app.ai_matching.models import AIMatchResult
 from app.anomaly.detector import detect_anomalies
+from app.anomaly.models import AnomalyResult
 from app.ingestion.bank_templates.base import BankPDFTemplate
 from app.ingestion.bank_templates.hdfc import HDFCBankTemplate
 from app.ingestion.csv_parser import parse_csv
@@ -33,8 +36,10 @@ from app.ingestion.ledger_templates.generic_ledger import (
 from app.ingestion.pdf_parser import PDFExtractionError, parse_pdf
 from app.ingestion.vision_client import LocalPDFExtractor, VisionExtractor
 from app.matching.matcher import match
+from app.matching.models import MatchResult
 from app.matching.near_matcher import match_near
 from app.report.builder import build_report
+from app.report.classify import classify_unmatched, match_issue, reconciliation_summary
 from app.schema import Transaction
 
 logger = logging.getLogger(__name__)
@@ -229,20 +234,21 @@ async def ingest(
     )
 
 
-@app.post("/reconcile")
-async def reconcile(
-    bank_file: UploadFile = File(...),
-    ledger_file: UploadFile = File(...),
-    bank_pdf_template: str | None = Form(default=None),
-    ledger_pdf_template: str | None = Form(default=None),
-    vision_extractor: VisionExtractor = Depends(get_vision_extractor),
-    embedding_client: EmbeddingClient = Depends(get_embedding_client),
-    confirmer: MatchConfirmer = Depends(get_match_confirmer),
-) -> StreamingResponse:
+async def _run_reconciliation(
+    *,
+    bank_file: UploadFile,
+    ledger_file: UploadFile,
+    bank_pdf_template: str | None,
+    ledger_pdf_template: str | None,
+    vision_extractor: VisionExtractor,
+    embedding_client: EmbeddingClient,
+    confirmer: MatchConfirmer,
+) -> tuple[MatchResult, AIMatchResult, AnomalyResult, bytes]:
     """Full pipeline, end to end: ingest both files (Stage 0), deterministic match
     (Stage 1), AI matching net on whatever Stage 1 couldn't resolve (Stage 2),
-    anomaly detection across the full reconciled set (Stage 3), then export the
-    audit-ready report as a downloadable .xlsx workbook.
+    anomaly detection across the full reconciled set (Stage 3), then build the
+    audit-ready .xlsx report bytes. Shared by every route that runs the pipeline, so
+    the .xlsx download and the JSON dashboard preview are always the same result.
     """
     bank_bytes = await _read_upload(bank_file)
     ledger_bytes = await _read_upload(ledger_file)
@@ -292,11 +298,134 @@ async def reconcile(
     anomaly_result = detect_anomalies(match_result)
     report_bytes = build_report(match_result, ai_result, anomaly_result)
 
+    return match_result, ai_result, anomaly_result, report_bytes
+
+
+@app.post("/reconcile")
+async def reconcile(
+    bank_file: UploadFile = File(...),
+    ledger_file: UploadFile = File(...),
+    bank_pdf_template: str | None = Form(default=None),
+    ledger_pdf_template: str | None = Form(default=None),
+    vision_extractor: VisionExtractor = Depends(get_vision_extractor),
+    embedding_client: EmbeddingClient = Depends(get_embedding_client),
+    confirmer: MatchConfirmer = Depends(get_match_confirmer),
+) -> StreamingResponse:
+    """Run the pipeline and return the audit-ready report as a downloadable .xlsx."""
+    _, _, _, report_bytes = await _run_reconciliation(
+        bank_file=bank_file,
+        ledger_file=ledger_file,
+        bank_pdf_template=bank_pdf_template,
+        ledger_pdf_template=ledger_pdf_template,
+        vision_extractor=vision_extractor,
+        embedding_client=embedding_client,
+        confirmer=confirmer,
+    )
+
     return StreamingResponse(
         io.BytesIO(report_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=reconciliation_report.xlsx"},
     )
+
+
+def _txn_summary(txn: Transaction) -> dict:
+    return {
+        "date": txn.date.isoformat(),
+        "amount": float(txn.amount),
+        "description": txn.description,
+        "reference": txn.reference,
+        "source": txn.source,
+    }
+
+
+@app.post("/reconcile/preview")
+async def reconcile_preview(
+    bank_file: UploadFile = File(...),
+    ledger_file: UploadFile = File(...),
+    bank_pdf_template: str | None = Form(default=None),
+    ledger_pdf_template: str | None = Form(default=None),
+    vision_extractor: VisionExtractor = Depends(get_vision_extractor),
+    embedding_client: EmbeddingClient = Depends(get_embedding_client),
+    confirmer: MatchConfirmer = Depends(get_match_confirmer),
+) -> dict:
+    """Run the pipeline once and return it as JSON for the in-browser results
+    dashboard, with the .xlsx workbook embedded as base64 so a subsequent download
+    doesn't have to run the pipeline (and any live model calls) a second time.
+    """
+    match_result, ai_result, anomaly_result, report_bytes = await _run_reconciliation(
+        bank_file=bank_file,
+        ledger_file=ledger_file,
+        bank_pdf_template=bank_pdf_template,
+        ledger_pdf_template=ledger_pdf_template,
+        vision_extractor=vision_extractor,
+        embedding_client=embedding_client,
+        confirmer=confirmer,
+    )
+
+    matched = match_result.matched
+    bank_txns_all = [p.bank_transaction for p in matched] + ai_result.unmatched_bank + [
+        p.bank_transaction for p in ai_result.ai_matched
+    ]
+    ledger_txns_all = [p.ledger_transaction for p in matched] + ai_result.unmatched_ledger + [
+        p.ledger_transaction for p in ai_result.ai_matched
+    ]
+
+    summary_by_item = {
+        row["item"]: row
+        for row in reconciliation_summary(
+            bank_txns_all, ledger_txns_all, matched,
+            ai_result.unmatched_bank, ai_result.unmatched_ledger,
+        )
+        if row["item"]
+    }
+
+    return {
+        "summary": {
+            "bank_total": summary_by_item["Bank transactions"]["amount"],
+            "bank_count": summary_by_item["Bank transactions"]["count"],
+            "ledger_total": summary_by_item["Ledger transactions"]["amount"],
+            "ledger_count": summary_by_item["Ledger transactions"]["count"],
+            "difference": summary_by_item["Difference to explain"]["amount"],
+            "unexplained": summary_by_item["UNEXPLAINED"]["amount"],
+        },
+        "matched": [
+            {
+                "bank": _txn_summary(pair.bank_transaction),
+                "ledger": _txn_summary(pair.ledger_transaction),
+                "rule": pair.rule,
+                "corroboration": pair.corroboration,
+                "issue": match_issue(pair),
+            }
+            for pair in matched
+        ],
+        "ai_matched": [
+            {
+                "bank": _txn_summary(pair.bank_transaction),
+                "ledger": _txn_summary(pair.ledger_transaction),
+                "confidence": pair.confidence,
+                "reasoning": pair.reasoning,
+            }
+            for pair in ai_result.ai_matched
+        ],
+        "unmatched_bank": [
+            {**_txn_summary(txn), "reason": classify_unmatched(txn, ledger_txns_all)}
+            for txn in ai_result.unmatched_bank
+        ],
+        "unmatched_ledger": [
+            {**_txn_summary(txn), "reason": classify_unmatched(txn, bank_txns_all)}
+            for txn in ai_result.unmatched_ledger
+        ],
+        "anomalies": [
+            {
+                "rule": flag.rule,
+                "reason": flag.reason,
+                "transactions": [_txn_summary(txn) for txn in flag.transactions],
+            }
+            for flag in anomaly_result.flags
+        ],
+        "report_base64": base64.b64encode(report_bytes).decode("ascii"),
+    }
 
 
 # Mounted last so it only catches requests that don't match an API route above

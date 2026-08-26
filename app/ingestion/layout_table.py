@@ -56,9 +56,17 @@ def _header_columns(line: str) -> Optional[dict[str, _Column]]:
     columns: dict[str, _Column] = {}
     for match in re.finditer(r"\S(?:.*?\S)?(?=\s{2,}|$)", line):
         name = _classify(match.group())
-        # First occurrence wins: "Date" in a "Value Date" trailing column should not
-        # displace the real leading date column.
-        if name and name not in columns:
+        if not name:
+            continue
+        if name == "reference":
+            # Rightmost wins for references. A ledger can carry both an internal
+            # "Voucher No." and the "Ref./UTR No." that actually appears on the bank
+            # side; the matching one sits nearest the money columns, and taking the
+            # first would grab the voucher number — useless for reconciliation.
+            columns[name] = _Column(name, match.start(), match.end())
+        elif name not in columns:
+            # First occurrence wins otherwise: a trailing "Value Dt" must not
+            # displace the leading "Date" column.
             columns[name] = _Column(name, match.start(), match.end())
     return columns or None
 
@@ -89,6 +97,44 @@ def _assign_amount(token_end: int, money_columns: list[_Column]) -> Optional[str
         if distance < best_distance:
             best, best_distance = column.name, distance
     return best
+
+
+def _reference_at(
+    line: str, columns: dict[str, _Column], first_money_start: int
+) -> Optional[str]:
+    """Read the cheque/reference cell, whole and without swallowing its neighbour.
+
+    Two traps, both seen on a real HDFC statement. Slicing at the header's own width
+    truncates the value — the "Chq./Ref.No." heading is 12 characters but the UTRs
+    beneath it are 16, so references came out cut short. Widening to the next
+    detected column instead swallows whatever sits between, such as an undetected
+    "Value Dt" column. Taking the first whitespace-delimited token from the cell's
+    start avoids both.
+
+    A reference of all zeros is the bank's way of printing "none" — 11 rows carried
+    `0000000000` on that statement. Kept as a value it would read as an exact
+    reference match between unrelated transactions, which is the strongest matching
+    signal there is, so it is treated as absent.
+    """
+    if "reference" not in columns:
+        return None
+
+    cell = line[columns["reference"].start : first_money_start]
+    token = cell.split(maxsplit=1)[0] if cell.split() else ""
+    if not token or set(token) <= {"0"}:
+        return None
+    return token
+
+
+# Rows that carry a balance but are not transactions: the statement's own opening
+# and closing markers. Emitting these as zero-amount transactions pollutes the
+# reconciliation, and the opening one is more useful as the starting balance that
+# lets the first real row be audited.
+_OPENING_ROW = re.compile(r"\b(opening\s+balance|balance\s+b/?f|brought\s+forward)\b", re.I)
+_CLOSING_ROW = re.compile(
+    r"\b(closing\s+balance|balance\s+c/?f|carried\s+forward|total\s+(withdrawals?|deposits?))\b",
+    re.I,
+)
 
 
 def parse_layout_table(text: str) -> Optional[list[dict]]:
@@ -196,18 +242,35 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
         # a long narration, because a value wider than its heading starts to the left
         # of it — and would leave that value's leading digits on the narration when
         # the narration is short ("...#INV-2241  1250").
-        if "reference" in columns:
-            description_end = columns["reference"].start
-        else:
-            description_end = (
-                earliest_money_start if earliest_money_start is not None else first_money_start
-            )
-        description = line[description_start:description_end].strip()
+        # The narration runs until the next column to its RIGHT — not simply until
+        # the reference column, which on some ledgers ("Voucher No." before
+        # "Particulars") sits to the LEFT and would make the slice run backwards,
+        # emptying every description.
+        boundaries = [
+            column.start
+            for name, column in columns.items()
+            # Money columns are bounded by where their VALUE starts, below — a value
+            # wider than its heading begins to the left of it, so using the heading
+            # position here would cut the narration short.
+            if name not in ("debit", "credit", "balance") and column.start > description_start
+        ]
+        boundaries.append(
+            earliest_money_start if earliest_money_start is not None else first_money_start
+        )
+        description = line[description_start : min(boundaries)].strip()
 
-        reference = None
-        if "reference" in columns:
-            reference_column = columns["reference"]
-            reference = line[reference_column.start : reference_column.end].strip() or None
+        reference = _reference_at(line, columns, first_money_start)
+
+        has_amount = "debit" in values or "credit" in values
+        # An opening-balance line is dated and sits in the table like a transaction,
+        # but it moved no money. Capture its balance as the starting point — that is
+        # what lets the first real row be checked arithmetically — and drop the row.
+        if not has_amount and _OPENING_ROW.search(description):
+            if opening_balance is None:
+                opening_balance = values.get("balance")
+            continue
+        if not has_amount and _CLOSING_ROW.search(description):
+            continue
 
         rows.append(
             {

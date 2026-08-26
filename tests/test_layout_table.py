@@ -111,3 +111,86 @@ def test_amount_wider_than_its_header_does_not_bleed_into_the_description() -> N
 
     assert rows[0]["description"] == "Rajesh Kumar Traders - Purchase Invoice #INV-2241"
     assert rows[0]["debit"] == "12,500.00"
+
+
+# Layouts below are anonymized reproductions of a real HDFC statement and a real
+# Tally-style bank ledger. Each encodes a quirk that broke extraction on first
+# contact with the genuine files.
+
+_REAL_STATEMENT = """\
+  Date       Narration                              Chq./Ref.No.           Value Dt   Withdrawal Amt.         Deposit Amt.     Closing Balance
+
+01/07/26     OPENING BALANCE                                               01/07/26                                                   245,000.00
+02/07/26     UPI/P2M/900000000001/SWIFTWAY          0000000000             02/07/26            1,180.00                               243,820.00
+             EXPRESS/Courier chg
+03/07/26     NEFT CR:HDFC0R00099920250703/NORTH     N032025070399999       03/07/26                               84,500.00           328,320.00
+             SUPPLY PVT LTD/INV-1042
+"""
+
+
+def test_opening_balance_row_is_not_a_transaction() -> None:
+    """It is dated and sits in the table like a transaction, but moved no money.
+    Emitting it adds a zero-amount row; capturing its balance instead is what lets
+    the first real transaction be audited."""
+    rows = parse_layout_table(_REAL_STATEMENT)
+    assert rows is not None
+
+    assert len(rows) == 2
+    assert not any("OPENING BALANCE" in r["description"] for r in rows)
+    assert rows[0]["opening_balance"] == "245,000.00"
+
+
+def test_all_zero_reference_is_treated_as_absent() -> None:
+    """`0000000000` is how the statement prints "no reference". Kept as a value it
+    reads as an exact reference match between unrelated rows — the strongest
+    matching signal there is."""
+    rows = parse_layout_table(_REAL_STATEMENT)
+    assert rows is not None
+
+    assert rows[0]["reference"] is None
+
+
+def test_reference_longer_than_its_heading_is_not_truncated() -> None:
+    """"Chq./Ref.No." is 12 characters; the UTRs beneath it are 16."""
+    rows = parse_layout_table(_REAL_STATEMENT)
+    assert rows is not None
+
+    assert rows[1]["reference"] == "N032025070399999"
+
+
+def test_value_date_column_is_not_read_as_a_reference_or_an_amount() -> None:
+    rows = parse_layout_table(_REAL_STATEMENT)
+    assert rows is not None
+
+    assert rows[1]["credit"] == "84,500.00"
+    assert rows[1]["balance"] == "328,320.00"
+    assert "07/26" not in (rows[1]["reference"] or "")
+
+
+_LEDGER_WITH_VOUCHER_FIRST = """\
+  Date         Voucher No.      Particulars                                  Ref./UTR No.        Debit (Receipt)   Credit (Payment)      Balance
+
+02-Jul-26        PV-0451        Swiftway Express - Courier charges           900000000001                                   1,180.00    243,820.00
+03-Jul-26        RV-0212        North Supply Pvt Ltd - INV-1042 realised     HDFC0R0009992025        84,500.00                          328,320.00
+"""
+
+
+def test_voucher_column_before_particulars_does_not_empty_the_description() -> None:
+    """A ledger can carry an internal voucher number BEFORE the narration. Treating
+    it as the reference column made the description slice run backwards, emptying
+    every narration in the file."""
+    rows = parse_layout_table(_LEDGER_WITH_VOUCHER_FIRST)
+    assert rows is not None
+
+    assert rows[0]["description"] == "Swiftway Express - Courier charges"
+    assert rows[1]["description"] == "North Supply Pvt Ltd - INV-1042 realised"
+
+
+def test_rightmost_reference_column_wins_over_an_internal_voucher_number() -> None:
+    """The voucher number is internal to the ledger; the UTR is what appears on the
+    bank side, so it is the one worth matching on."""
+    rows = parse_layout_table(_LEDGER_WITH_VOUCHER_FIRST)
+    assert rows is not None
+
+    assert rows[0]["reference"] == "900000000001"
+    assert rows[1]["reference"] == "HDFC0R0009992025"

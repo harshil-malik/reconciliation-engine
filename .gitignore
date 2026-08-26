@@ -10,3 +10,5 @@ models/
 *.gguf
 # Generated test fixtures — rebuild with scripts/make_sample_data.py
 sample_data/
+# Real client statements — never commit. Financial data, redacted or not.
+private/

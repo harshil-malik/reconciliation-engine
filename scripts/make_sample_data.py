@@ -21,10 +21,13 @@ The data deliberately exercises the pipeline rather than being trivially matchab
   * abbreviated payee   "RTGS-MAHESH ELECTRICALS PVT LTD" vs "Mahesh Elec"
   * bank-only row       SMS alert charges never reach the ledger
   * ledger-only row     a cheque issued but not yet presented
+  * duplicate payment   the same invoice paid twice a day apart, on BOTH sides
   * ragged amounts      so the round-number rule correctly stays quiet
 
-Expected on a correct run: 11 matched by Stage 1, the Mahesh pair left to Stage 2,
-and exactly one unmatched row on each side — both legitimately unmatched.
+Expected on a correct run: 13 matched by Stage 1, the Mahesh pair recovered by
+Stage 1.5, exactly one legitimately unmatched row on each side, and the duplicate
+flagged by anomaly detection despite both its legs reconciling perfectly — the case
+the spec singles out, where an anomaly sits on an already-matched pair.
 
     python scripts/make_sample_data.py
 """
@@ -65,6 +68,17 @@ TRANSACTIONS: list[tuple[int, str, str, str, str]] = [
      "Office rent - July", "-39750.00"),
     (28, "NEFT-VERMA & ASSOCIATES", "NFT5525",
      "Verma & Associates - consultancy fee", "-5525.00"),
+    # The same invoice paid twice, a day apart — an accounts-payable slip, and the
+    # thing a CA most wants caught. Both legs are genuine transactions that appear
+    # on BOTH sides, so they reconcile perfectly; the duplication is only visible to
+    # anomaly detection. This is the case the spec singles out: an anomaly sitting
+    # on an already-matched pair. Each transfer carries its own UTR, as two separate
+    # NEFT payments would, which is also what lets the matcher pair them one-to-one
+    # instead of treating the identical amounts as ambiguous.
+    (19, "NEFT-KUMAR STATIONERS INV-3312", "NFT3312A",
+     "Kumar Stationers - invoice INV-3312", "-18750.00"),
+    (20, "NEFT-KUMAR STATIONERS INV-3312", "NFT3312B",
+     "Kumar Stationers - invoice INV-3312", "-18750.00"),
 ]
 
 # The ledger records this one two days later than the bank (clearing lag), and one
@@ -211,10 +225,11 @@ def main() -> int:
     print(f"wrote {bank_path}")
     print(f"wrote {ledger_path}")
     print(
-        "\nExpected on a correct run: 11 matched by Stage 1, the Mahesh Electricals "
-        "pair left to Stage 2 (33,050.00 vs 33,000.00),\nand exactly one legitimately "
+        "\nExpected on a correct run: 13 matched by Stage 1, the Mahesh Electricals "
+        "pair recovered by Stage 1.5 (33,050.00 vs 33,000.00),\none legitimately "
         "unmatched row per side (SMS charges on the bank, an unpresented cheque in "
-        "the ledger)."
+        "the ledger),\nand the Kumar Stationers duplicate flagged even though both "
+        "its legs reconcile perfectly."
     )
     return 0
 

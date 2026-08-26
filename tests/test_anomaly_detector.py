@@ -80,3 +80,29 @@ def test_bank_and_ledger_duplicates_are_not_cross_matched() -> None:
     duplicate_flags = [f for f in result.flags if f.rule == "duplicate_payment"]
     assert len(duplicate_flags) == 1
     assert {t.id for t in duplicate_flags[0].transactions} == {bank_1.id, bank_2.id}
+
+
+def test_duplicate_payment_is_flagged_even_though_both_legs_reconcile() -> None:
+    """The case the spec singles out: paying an invoice twice produces two genuine
+    transactions that appear on BOTH sides, so they match perfectly and matching
+    alone can never surface the problem. Anomaly detection runs over the full
+    reconciled set precisely so this is still caught."""
+    bank_first = _txn(source="bank", amount="-18750", day=19, description="NEFT-KUMAR STATIONERS INV-3312")
+    bank_second = _txn(source="bank", amount="-18750", day=20, description="NEFT-KUMAR STATIONERS INV-3312")
+    ledger_first = _txn(source="ledger", amount="-18750", day=19, description="NEFT-KUMAR STATIONERS INV-3312")
+    ledger_second = _txn(source="ledger", amount="-18750", day=20, description="NEFT-KUMAR STATIONERS INV-3312")
+
+    match_result = MatchResult(
+        matched=[
+            MatchedPair(bank_transaction=bank_first, ledger_transaction=ledger_first, rule="exact_amount_same_date"),
+            MatchedPair(bank_transaction=bank_second, ledger_transaction=ledger_second, rule="exact_amount_same_date"),
+        ],
+        unmatched_bank=[],
+        unmatched_ledger=[],
+    )
+
+    flags = detect_anomalies(match_result).flags
+    duplicates = [f for f in flags if f.rule == "duplicate_payment"]
+
+    assert duplicates, "a duplicate that reconciles cleanly must still be flagged"
+    assert all(len(f.transactions) == 2 for f in duplicates)

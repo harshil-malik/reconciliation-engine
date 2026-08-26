@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.anomaly.config import AnomalyConfig
-from app.anomaly.models import AnomalyResult
+from app.anomaly.models import AnomalyFlag, AnomalyResult
 from app.anomaly.rules import (
     detect_duplicate_payments,
     detect_reversed_mirrored,
@@ -59,4 +59,66 @@ def detect_anomalies(
         max_prevalence=config.round_number_max_prevalence,
     )
 
-    return AnomalyResult(flags=flags)
+    return AnomalyResult(flags=_collapse_mirrored_duplicates(flags, match_result))
+
+
+def _collapse_mirrored_duplicates(
+    flags: list[AnomalyFlag], match_result: MatchResult
+) -> list[AnomalyFlag]:
+    """Report a double payment once, not once per set of books.
+
+    Duplicate detection runs separately over the statement and the ledger, so an
+    invoice genuinely paid twice is found on both sides and reported twice — the
+    same event, split across two flags, which a reviewer then has to recognise as
+    one. Where the two groups are the same transactions seen from either side (every
+    row in one is matched to a row in the other), they are merged into a single
+    finding carrying all the evidence.
+
+    A duplicate found on only ONE side is deliberately left alone. That is a
+    different and more serious finding — the bank debited twice while the books
+    recorded it once, or the reverse — and collapsing it into the mirrored case
+    would hide exactly the discrepancy worth chasing.
+    """
+    bank_to_ledger = {
+        pair.bank_transaction.id: pair.ledger_transaction.id for pair in match_result.matched
+    }
+
+    duplicates = [f for f in flags if f.rule == "duplicate_payment"]
+    others = [f for f in flags if f.rule != "duplicate_payment"]
+    ledger_flags = [f for f in duplicates if all(t.source == "ledger" for t in f.transactions)]
+
+    merged: list[AnomalyFlag] = []
+    consumed: set[int] = set()
+    for flag in duplicates:
+        if id(flag) in consumed:
+            continue
+        if not all(t.source == "bank" for t in flag.transactions):
+            continue
+
+        counterparts = {bank_to_ledger.get(t.id) for t in flag.transactions}
+        if None in counterparts:
+            continue  # not every leg reconciled, so the two sides are not equivalent
+
+        for candidate in ledger_flags:
+            if id(candidate) in consumed:
+                continue
+            if {t.id for t in candidate.transactions} != counterparts:
+                continue
+            consumed.update({id(flag), id(candidate)})
+            merged.append(
+                AnomalyFlag(
+                    rule="duplicate_payment",
+                    transactions=[*flag.transactions, *candidate.transactions],
+                    reason=(
+                        f"{len(flag.transactions)} payments of the same amount and "
+                        "description, recorded identically in the statement and the "
+                        "ledger — the books agree, so this reconciles cleanly and is "
+                        "only visible as a possible double payment. "
+                        + flag.reason.split(" — ")[0]
+                    ),
+                )
+            )
+            break
+
+    untouched = [f for f in duplicates if id(f) not in consumed]
+    return [*merged, *untouched, *others]

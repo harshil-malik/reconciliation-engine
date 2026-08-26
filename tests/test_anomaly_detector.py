@@ -41,10 +41,13 @@ def test_anomaly_can_be_flagged_on_an_already_matched_pair() -> None:
     result = detect_anomalies(match_result, config=AnomalyConfig(duplicate_window_days=1))
 
     duplicate_flags = [f for f in result.flags if f.rule == "duplicate_payment"]
-    # both the bank-side pair and the ledger-side pair get flagged independently
-    assert len(duplicate_flags) == 2
+    # One real-world event, so one finding — the two sides are the same two payments
+    # seen from either set of books, and reporting them separately would make a
+    # reviewer de-duplicate the duplicate report. All four rows remain as evidence.
+    assert len(duplicate_flags) == 1
     flagged_ids = {t.id for flag in duplicate_flags for t in flag.transactions}
     assert flagged_ids == {bank_1.id, bank_2.id, ledger_1.id, ledger_2.id}
+    assert "recorded identically in the statement and the ledger" in duplicate_flags[0].reason
 
 
 def test_anomaly_flags_unmatched_rows_too() -> None:
@@ -105,4 +108,29 @@ def test_duplicate_payment_is_flagged_even_though_both_legs_reconcile() -> None:
     duplicates = [f for f in flags if f.rule == "duplicate_payment"]
 
     assert duplicates, "a duplicate that reconciles cleanly must still be flagged"
-    assert all(len(f.transactions) == 2 for f in duplicates)
+    assert len(duplicates) == 1
+    assert len(duplicates[0].transactions) == 4  # both legs, from both sets of books
+
+
+def test_duplicate_on_only_one_side_is_not_collapsed() -> None:
+    """The bank debited twice but the books recorded it once. That is a different and
+    worse finding than a mirrored double payment, and must not be folded into it —
+    the un-booked leg is exactly the discrepancy worth chasing."""
+    bank_1 = _txn(source="bank", amount="5000", day=1, description="Vendor Payment")
+    bank_2 = _txn(source="bank", amount="5000", day=2, description="Vendor Payment")
+    ledger_1 = _txn(source="ledger", amount="5000", day=1, description="Vendor Payment")
+
+    match_result = MatchResult(
+        matched=[
+            MatchedPair(bank_transaction=bank_1, ledger_transaction=ledger_1, rule="exact_amount_same_date")
+        ],
+        unmatched_bank=[bank_2],
+        unmatched_ledger=[],
+    )
+
+    result = detect_anomalies(match_result, config=AnomalyConfig(duplicate_window_days=1))
+    duplicates = [f for f in result.flags if f.rule == "duplicate_payment"]
+
+    assert len(duplicates) == 1
+    assert {t.source for t in duplicates[0].transactions} == {"bank"}
+    assert "recorded identically" not in duplicates[0].reason

@@ -125,8 +125,28 @@ def reconciliation_summary(
         row("Difference to explain", "", float(difference), "bank net less ledger net"),
         row("", "", "", ""),
         row("Matched", len(matched), "", "paired between the two documents"),
-        row("  of which need review", sum(1 for p in matched if match_issue(p)), "",
-            "see the Needs Review tab"),
+        row(
+            "  amounts disagree",
+            sum(
+                1
+                for p in matched
+                if p.bank_transaction.amount != p.ledger_transaction.amount
+            ),
+            "",
+            "see Review - Amount",
+        ),
+        row(
+            "  booked on different dates",
+            sum(1 for p in matched if p.bank_transaction.date != p.ledger_transaction.date),
+            "",
+            "see Review - Date",
+        ),
+        row(
+            "  matched on figures alone",
+            sum(1 for p in matched if p.corroboration == "amount_and_date_only"),
+            "",
+            "see Review - Weak Evidence",
+        ),
         row("Bank-only items", len(unmatched_bank), float(bank_only),
             "on the statement, not in the ledger"),
         row("Ledger-only items", len(unmatched_ledger), float(ledger_only),

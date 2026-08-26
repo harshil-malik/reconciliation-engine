@@ -69,7 +69,7 @@ def test_build_report_produces_four_sheets_with_expected_rows() -> None:
     report_bytes = build_report(match_result, ai_match_result, anomaly_result)
 
     sheets = pd.read_excel(io.BytesIO(report_bytes), sheet_name=None)
-    assert set(sheets.keys()) == {"Summary", "Matched", "Needs Review", "AI Matched", "Unmatched - Bank", "Unmatched - Ledger", "Anomalies"}
+    assert set(sheets.keys()) == {"Summary", "Matched", "Review - Amount", "Review - Date", "Review - Weak Evidence", "AI Matched", "Unmatched - Bank", "Unmatched - Ledger", "Anomalies"}
 
     assert len(sheets["Matched"]) == 1
     assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_same_date"
@@ -98,7 +98,7 @@ def test_build_report_handles_empty_result_sets() -> None:
     report_bytes = build_report(match_result, ai_match_result, anomaly_result)
     sheets = pd.read_excel(io.BytesIO(report_bytes), sheet_name=None)
 
-    assert set(sheets.keys()) == {"Summary", "Matched", "Needs Review", "AI Matched", "Unmatched - Bank", "Unmatched - Ledger", "Anomalies"}
+    assert set(sheets.keys()) == {"Summary", "Matched", "Review - Amount", "Review - Date", "Review - Weak Evidence", "AI Matched", "Unmatched - Bank", "Unmatched - Ledger", "Anomalies"}
     for name, df in sheets.items():
         if name != "Summary":
             assert len(df) == 0, name
@@ -126,3 +126,36 @@ def test_anomaly_flag_with_two_transactions_produces_two_rows_sharing_group_id()
     anomalies = pd.read_excel(io.BytesIO(report_bytes), sheet_name="Anomalies")
     assert len(anomalies) == 2
     assert anomalies["group_id"].nunique() == 1
+
+
+def test_pairing_that_fails_on_two_counts_appears_in_both_review_tabs() -> None:
+    """Filing it under a single "primary" reason would leave the other tab quietly
+    incomplete — someone reviewing all the date differences would not see it."""
+    bank = _txn(source="bank", amount="45000", day=18, description="IMPS DIVYA KAPOOR")
+    ledger = _txn(source="ledger", amount="45500", day=20, description="Divya Kapoor fee")
+
+    report_bytes = build_report(
+        MatchResult(
+            matched=[
+                MatchedPair(
+                    bank_transaction=bank,
+                    ledger_transaction=ledger,
+                    rule="near_amount_matching_description",
+                    corroboration="description",
+                )
+            ],
+            unmatched_bank=[],
+            unmatched_ledger=[],
+        ),
+        AIMatchResult(ai_matched=[], unmatched_bank=[], unmatched_ledger=[]),
+        AnomalyResult(flags=[]),
+    )
+    sheets = pd.read_excel(io.BytesIO(report_bytes), sheet_name=None)
+
+    assert len(sheets["Review - Amount"]) == 1
+    assert len(sheets["Review - Date"]) == 1
+    assert len(sheets["Review - Weak Evidence"]) == 0
+    # and the issue text states the whole picture in both places
+    for tab in ("Review - Amount", "Review - Date"):
+        issue = sheets[tab].iloc[0]["issue"]
+        assert "amount differs by 500" in issue and "2 day(s) apart" in issue

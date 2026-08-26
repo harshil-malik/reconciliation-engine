@@ -65,7 +65,13 @@ _SHEET_COLUMNS = {
     "Matched": _pair_columns(
         ["rule", "corroboration", "date_gap_days", "amount_difference", "similarity"]
     ),
-    "Needs Review": _pair_columns(
+    "Review - Amount": _pair_columns(
+        ["issue", "rule", "corroboration", "date_gap_days", "amount_difference", "similarity"]
+    ),
+    "Review - Date": _pair_columns(
+        ["issue", "rule", "corroboration", "date_gap_days", "amount_difference", "similarity"]
+    ),
+    "Review - Weak Evidence": _pair_columns(
         ["issue", "rule", "corroboration", "date_gap_days", "amount_difference", "similarity"]
     ),
     "AI Matched": _pair_columns(["confidence", "reasoning"]),
@@ -99,9 +105,11 @@ def build_report(
     two readers counted the same file differently because nothing said which was
     which.
 
-    Summary            the balancing proof: is every rupee of difference accounted for
-    Matched            every pairing, with its date gap, amount gap and evidence
-    Needs Review       the subset a person should actually look at
+    Summary                the balancing proof: is every rupee of difference accounted for
+    Matched                every pairing, with its date gap, amount gap and evidence
+    Review - Amount        pairings where the two sides disagree about the money
+    Review - Date          pairings booked on different dates
+    Review - Weak Evidence pairings resting on the figures alone
     AI Matched         model-asserted pairs, kept separate as they are the least certain
     Unmatched - Bank   on the statement, not in the books, each with a reason
     Unmatched - Ledger in the books, not on the statement, each with a reason
@@ -115,11 +123,24 @@ def build_report(
         p.ledger_transaction for p in ai_match_result.ai_matched
     ]
 
-    needs_review = []
+    # One tab per reason a pairing needs attention, because "show me everything
+    # where the amounts disagree" is a different job from "show me the timing
+    # differences" and a reviewer does them separately. A pairing that fails on more
+    # than one count appears in each relevant tab — the alternative, filing it under
+    # a single "primary" reason, leaves the other tab quietly incomplete — and its
+    # `issue` column always states the full picture.
+    amount_review, date_review, weak_review = [], [], []
     for pair in matched:
         issue = match_issue(pair)
-        if issue:
-            needs_review.append({"issue": issue, **_pair_row(pair)})
+        if not issue:
+            continue
+        row = {"issue": issue, **_pair_row(pair)}
+        if row["amount_difference"]:
+            amount_review.append(row)
+        if row["date_gap_days"]:
+            date_review.append(row)
+        if pair.corroboration == "amount_and_date_only":
+            weak_review.append(row)
 
     ai_rows = []
     for pair in ai_match_result.ai_matched:
@@ -153,7 +174,9 @@ def build_report(
             )
         ),
         "Matched": pd.DataFrame([_pair_row(p) for p in matched]),
-        "Needs Review": pd.DataFrame(needs_review),
+        "Review - Amount": pd.DataFrame(amount_review),
+        "Review - Date": pd.DataFrame(date_review),
+        "Review - Weak Evidence": pd.DataFrame(weak_review),
         "AI Matched": pd.DataFrame(ai_rows),
         "Unmatched - Bank": pd.DataFrame(
             _unmatched_rows(ai_match_result.unmatched_bank, ledger_txns)

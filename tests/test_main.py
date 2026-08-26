@@ -134,7 +134,7 @@ def test_reconcile_runs_full_pipeline_and_returns_report() -> None:
     assert "reconciliation_report.xlsx" in response.headers["content-disposition"]
 
     sheets = pd.read_excel(io.BytesIO(response.content), sheet_name=None)
-    assert set(sheets.keys()) == {"Summary", "Matched", "Needs Review", "AI Matched", "Unmatched - Bank", "Unmatched - Ledger", "Anomalies"}
+    assert set(sheets.keys()) == {"Summary", "Matched", "Review - Amount", "Review - Date", "Review - Weak Evidence", "AI Matched", "Unmatched - Bank", "Unmatched - Ledger", "Anomalies"}
 
     matched = sheets["Matched"]
     rules = set(matched["rule"])

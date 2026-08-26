@@ -13,7 +13,7 @@ contradict themselves.
 
 ```bash
 cd ~/v-01
-source .venv/bin/activate && python -m pytest -q      # expect 114 passed
+source .venv/bin/activate && python -m pytest -q      # expect 165 passed
 llama-server -m models/qwen2.5-3b-instruct-q4_k_m.gguf --port 8080 -c 8192 &
 llama-server -m models/Qwen3-Embedding-0.6B-Q8_0.gguf --port 8081 --embeddings &
 python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \

@@ -58,12 +58,19 @@ comment.
 
 ## Verified working
 
-- **114 tests**, fully offline (model clients use `httpx.MockTransport`).
+- **165 tests**, fully offline (model clients use `httpx.MockTransport`).
 - **End-to-end on the generated fixture**: 11 Stage 1 + 1 Stage 1.5 + 2 legitimately
   unmatched + 3 anomalies. `scripts/verify_reconciliation.py` passes all four checks.
 - **Local models live** — Qwen2.5-3B-Instruct (chat, :8080) and Qwen3-Embedding-0.6B
   (:8081), both in `models/` (gitignored).
-- **Git**: real history, currently through `e7dac35`.
+- **Git**: private GitHub repo at
+  `https://github.com/harshil4857398475435/reconciliation-engine`, currently through
+  `0b230ec`. History was rewritten once with `git filter-repo` to purge identifiers
+  taken from real statement PDFs (account holder, account number, customer id, IFSC,
+  transaction ids, counterparty names) before the first push — replacements are
+  length-preserving so the column-alignment fixtures still test the same character
+  positions. **Never commit anything from `private/`**; it holds real client files
+  and is gitignored.
 
 ## Tools built for this project
 
@@ -131,7 +138,7 @@ cd ~/v-01
 pgrep -fl llama-server                     # both model servers up?
 curl -s localhost:8080/health              # chat  (binds only after weights load)
 curl -s localhost:8081/health              # embeddings
-source .venv/bin/activate && python -m pytest -q          # expect 114 passed
+source .venv/bin/activate && python -m pytest -q          # expect 165 passed
 python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \
                                         sample_data/internal_ledger.pdf
 git log --oneline | head -5

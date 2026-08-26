@@ -171,3 +171,46 @@ def test_no_printed_totals_means_no_foot_check(tmp_path: Path) -> None:
     """Plenty of ledgers print no summary. Absence must not be treated as failure."""
     rows = [_row("01/08/26", "VENDOR PAYMENT", debit="12500.00", balance="117500.00")]
     assert len(_parse(rows, HDFCBankTemplate(), tmp_path)) == 1
+
+
+def test_ocr_error_in_an_amount_is_rejected(tmp_path: Path) -> None:
+    """12,500 misread as 12,600. The balance column is intact and disagrees, so the
+    file is refused rather than reconciled against a corrupted figure."""
+    rows = [
+        _row("01/08/26", "VENDOR PAYMENT", debit="12600.00", balance="117500.00"),
+        _row("02/08/26", "RECEIPT", credit="8340.00", balance="125840.00"),
+    ]
+    rows[0]["opening_balance"] = "130000.00"
+
+    with pytest.raises(PDFExtractionError, match="Row 1"):
+        _parse(rows, HDFCBankTemplate(), tmp_path)
+
+
+def test_ocr_error_in_a_balance_is_rejected(tmp_path: Path) -> None:
+    """The corruption is in the balance column itself rather than an amount. The two
+    readings still disagree, which is what matters — neither can be trusted."""
+    rows = [
+        _row("01/08/26", "VENDOR PAYMENT", debit="12500.00", balance="117800.00"),
+        _row("02/08/26", "RECEIPT", credit="8340.00", balance="125840.00"),
+    ]
+    rows[0]["opening_balance"] = "130000.00"
+
+    with pytest.raises(PDFExtractionError):
+        _parse(rows, HDFCBankTemplate(), tmp_path)
+
+
+def test_reported_row_number_counts_transactions_as_printed(tmp_path: Path) -> None:
+    """A reader uses this number to find the line on the statement. The opening
+    balance is prepended internally to give row 1 something to be checked against,
+    and that must not shift the number a person is sent to."""
+    rows = [
+        _row("01/08/26", "FIRST ROW ON THE STATEMENT", debit="12600.00", balance="117500.00"),
+        _row("02/08/26", "RECEIPT", credit="8340.00", balance="125840.00"),
+    ]
+    rows[0]["opening_balance"] = "130000.00"
+
+    with pytest.raises(PDFExtractionError) as exc:
+        _parse(rows, HDFCBankTemplate(), tmp_path)
+
+    assert "Row 1 (01/08/26 'FIRST ROW ON THE STATEMENT')" in str(exc.value)
+    assert "Row 2 (01/08/26" not in str(exc.value)

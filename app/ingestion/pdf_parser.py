@@ -105,6 +105,11 @@ def _reconcile_against_balances(
         )
 
     for i in range(start_index, len(rows)):
+        # Row numbers appear in messages a person uses to find the line on a
+        # printed statement, so they must count transactions as printed. When an
+        # opening balance was prepended above, the list is one longer than the
+        # statement and the raw index would send the reader to the wrong row.
+        printed_row_number = i if opening is not None else i + 1
         previous, current = balances[i - 1], balances[i]
         if previous is None or current is None:
             continue
@@ -119,8 +124,9 @@ def _reconcile_against_balances(
         # happened. Nothing contradicts it, so take it.
         if amounts[i] == 0:
             corrections.append(
-                f"row {i + 1} ({rows[i].get('date')} {str(rows[i].get('description'))[:30]!r}): "
-                f"no amount printed, recovered {delta} from the balance movement"
+                f"row {printed_row_number} ({rows[i].get('date')} "
+                f"{str(rows[i].get('description'))[:30]!r}): no amount printed, "
+                f"recovered {delta} from the balance movement"
             )
             corrected[i] = delta
             continue
@@ -131,15 +137,16 @@ def _reconcile_against_balances(
         }
         if abs(delta) in seen and abs(delta) != 0:
             corrections.append(
-                f"row {i + 1} ({rows[i].get('date')} {str(rows[i].get('description'))[:30]!r}): "
-                f"read {amounts[i]}, balance delta says {delta}"
+                f"row {printed_row_number} ({rows[i].get('date')} "
+                f"{str(rows[i].get('description'))[:30]!r}): read {amounts[i]}, "
+                f"balance delta says {delta}"
             )
             corrected[i] = delta
             continue
 
         raise PDFExtractionError(
             f"Extraction from {file_name} is inconsistent and was rejected rather than "
-            f"reported. Row {i + 1} ({rows[i].get('date')} "
+            f"reported. Row {printed_row_number} ({rows[i].get('date')} "
             f"{str(rows[i].get('description'))[:40]!r}) was read as {amounts[i]}, but the "
             f"closing balance moved by {delta} ({previous} -> {current}). The transaction "
             "amount and the running balance disagree, so neither can be trusted — the "

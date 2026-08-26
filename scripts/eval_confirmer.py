@@ -72,7 +72,7 @@ CASES: list[tuple[bool, str, Transaction, Transaction]] = [
      _txn("bank", "-88000.00", 11, "NEFT PAYMT INV-4471"),
      _txn("ledger", "-88000.00", 13, "Invoice 4471 settlement Zenith")),
     (True, "name reversed",
-     _txn("bank", "-41000.00", 4, "NEFT SHARMA PRIYA"),
+     _txn("bank", "-41000.00", 4, "NEFT KAPOOR DIVYA"),
      _txn("ledger", "-41000.00", 5, "Divya Kapoor consultancy")),
     # --- should NOT match ---------------------------------------------------
     (False, "different vendor",

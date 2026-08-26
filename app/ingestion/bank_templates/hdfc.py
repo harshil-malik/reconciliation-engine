@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.ingestion.bank_templates.base import parse_json_rows
+from app.ingestion.bank_templates.hdfc_narration import parse_narration
 
 _PROMPT = """\
 You are reading the extracted TEXT of an HDFC Bank statement. The text below was
@@ -56,6 +57,10 @@ class HDFCBankTemplate:
 
     def build_prompt(self) -> str:
         return _PROMPT
+
+    def extra_references(self, description: str) -> list[str]:
+        reference = parse_narration(description).reference
+        return [reference] if reference else []
 
     def parse_response(self, response_text: str) -> list[dict]:
         return parse_json_rows(response_text)

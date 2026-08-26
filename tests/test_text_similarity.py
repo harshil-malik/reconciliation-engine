@@ -40,3 +40,44 @@ def test_candidate_similarity_falls_back_to_description_when_no_reference_match(
 
     score = candidate_similarity(bank, ledger)
     assert 0.0 < score < 1.0
+
+
+def _ref_txn(reference=None, alt_references=None, description="x"):
+    from datetime import date
+    from decimal import Decimal
+
+    from app.schema import Transaction
+
+    return Transaction(
+        date=date(2026, 7, 1),
+        amount=Decimal("1"),
+        description=description,
+        reference=reference,
+        alt_references=alt_references or [],
+        source="bank",
+        file_name="x.pdf",
+        raw_row={},
+    )
+
+
+def test_reference_recovered_from_a_narration_still_matches() -> None:
+    """The bank printed a placeholder in its reference column and buried the real id
+    in the narration; the ledger recorded that id properly."""
+    from app.matching.text_similarity import references_match
+
+    bank = _ref_txn(reference=None, alt_references=["900000000001"])
+    ledger = _ref_txn(reference="900000000001")
+
+    assert references_match(bank, ledger)
+
+
+def test_cheque_numbers_match_across_different_zero_padding() -> None:
+    from app.matching.text_similarity import references_match
+
+    assert references_match(_ref_txn(alt_references=["412"]), _ref_txn(reference="000412"))
+
+
+def test_rows_without_any_identifier_do_not_match_on_reference() -> None:
+    from app.matching.text_similarity import references_match
+
+    assert not references_match(_ref_txn(), _ref_txn())

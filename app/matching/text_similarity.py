@@ -65,15 +65,36 @@ def descriptions_corroborate(bank_txn: Transaction, ledger_txn: Transaction) -> 
     )
 
 
+def _reference_forms(txn: Transaction) -> set[str]:
+    """Every identifier this row can be matched on, in comparable form.
+
+    Includes ids recovered from the narration, since a bank may bury the real
+    transaction id there while printing a placeholder in the reference column.
+    Leading zeros are stripped from purely numeric ids: a cheque is "000412" on one
+    side and "412" on the other, and they are the same cheque.
+    """
+    forms: set[str] = set()
+    for raw in [txn.reference, *txn.alt_references]:
+        if not raw:
+            continue
+        value = _normalize_text(raw)
+        if not value:
+            continue
+        forms.add(value)
+        if value.isdigit():
+            forms.add(value.lstrip("0") or "0")
+    return forms
+
+
 def references_match(bank_txn: Transaction, ledger_txn: Transaction) -> bool:
-    """Both sides carry the same cheque/UTR/voucher number.
+    """The two rows carry an identifier in common.
 
     The strongest evidence available in reconciliation: banks and ledgers word
-    narrations differently, but a reference number is the same string by design.
+    narrations differently, but a transaction id is the same string by design.
     """
-    if not (bank_txn.reference and ledger_txn.reference):
-        return False
-    return _normalize_text(bank_txn.reference) == _normalize_text(ledger_txn.reference)
+    bank_forms = _reference_forms(bank_txn)
+    ledger_forms = _reference_forms(ledger_txn)
+    return bool(bank_forms and ledger_forms and bank_forms & ledger_forms)
 
 
 def candidate_similarity(bank_txn: Transaction, ledger_txn: Transaction) -> float:

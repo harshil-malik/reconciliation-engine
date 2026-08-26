@@ -45,6 +45,13 @@ class BankPDFTemplate(Protocol):
         """Instructions sent to the vision LLM alongside the PDF bytes."""
         ...
 
+    def extra_references(self, description: str) -> list[str]:
+        """Identifiers hidden in the narration, if this format buries any there.
+
+        Optional — `parse_pdf` treats a template without it as having none.
+        """
+        ...
+
     def parse_response(self, response_text: str) -> list[dict]:
         """Parse the vision LLM's response into raw row dicts with keys:
         date, description, reference, debit, credit (all pre-normalization, as

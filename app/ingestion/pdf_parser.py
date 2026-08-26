@@ -207,11 +207,15 @@ def parse_pdf(
         # "the statement said nothing here" apart from "extraction lost the text".
         description = str(raw_row.get("description") or "").strip() or "(no narration)"
 
+        extractor_refs = getattr(template, "extra_references", None)
+        alt_references = list(extractor_refs(description)) if extractor_refs else []
+
         transactions.append(
             Transaction(
                 date=parsed_date,
                 amount=amount,
                 description=description,
+                alt_references=alt_references,
                 reference=str(reference).strip() if reference else None,
                 source=source,
                 file_name=resolved_name,

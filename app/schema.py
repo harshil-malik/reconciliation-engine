@@ -29,6 +29,11 @@ class Transaction(BaseModel):
     amount: Decimal
     description: str
     reference: Optional[str] = None
+    # Identifiers found elsewhere in the row — chiefly transaction ids that a bank
+    # buries in the narration while printing a placeholder in the reference column.
+    # Kept alongside `reference` rather than replacing it: which form the ledger
+    # records varies, so matching should be free to use either.
+    alt_references: list[str] = Field(default_factory=list)
     source: Literal["bank", "ledger"]
     file_name: str
     raw_row: dict[str, Any]

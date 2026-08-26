@@ -123,3 +123,51 @@ def test_rows_without_balances_are_left_alone(tmp_path: Path) -> None:
     transactions = _parse(rows, HDFCBankTemplate(), tmp_path)
 
     assert [t.amount for t in transactions] == [Decimal("-15075.00"), Decimal("25000.00")]
+
+
+def _row_with_totals(rows: list[dict], **totals) -> list[dict]:
+    rows[0]["printed_totals"] = totals
+    return rows
+
+
+def test_dropped_row_is_caught_by_footing_to_the_printed_totals(tmp_path: Path) -> None:
+    """A statement with no running-balance column, where a row was missed.
+
+    The per-row audit needs consecutive balances and so is silent here — exactly the
+    situation where a dropped row would otherwise pass unnoticed, because the rows
+    that survive are individually unremarkable. The document's own totals are the
+    only remaining evidence that money is absent.
+    """
+    rows = _row_with_totals(
+        [
+            _row("01/08/26", "VENDOR PAYMENT", debit="12500.00"),
+            # the 8,340 receipt that belongs between these was missed
+            _row("03/08/26", "RENT", debit="40000.00"),
+        ],
+        opening="130000.00",
+        closing="85840.00",  # implies a net movement of -44,160, not the -52,500 read
+    )
+
+    with pytest.raises(PDFExtractionError, match="does not foot"):
+        _parse(rows, HDFCBankTemplate(), tmp_path)
+
+
+def test_complete_extraction_foots_and_is_accepted(tmp_path: Path) -> None:
+    rows = _row_with_totals(
+        [
+            _row("01/08/26", "VENDOR PAYMENT", debit="12500.00"),
+            _row("02/08/26", "RECEIPT", credit="8340.00"),
+            _row("03/08/26", "RENT", debit="40000.00"),
+        ],
+        opening="130000.00",
+        closing="85840.00",
+    )
+
+    transactions = _parse(rows, HDFCBankTemplate(), tmp_path)
+    assert len(transactions) == 3
+
+
+def test_no_printed_totals_means_no_foot_check(tmp_path: Path) -> None:
+    """Plenty of ledgers print no summary. Absence must not be treated as failure."""
+    rows = [_row("01/08/26", "VENDOR PAYMENT", debit="12500.00", balance="117500.00")]
+    assert len(_parse(rows, HDFCBankTemplate(), tmp_path)) == 1

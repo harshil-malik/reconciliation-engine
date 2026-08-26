@@ -99,6 +99,32 @@ def _assign_amount(token_end: int, money_columns: list[_Column]) -> Optional[str
     return best
 
 
+_TOTAL_PATTERNS = {
+    # \D cannot cross a digit, so a generous gap is safe: summary blocks pad the
+    # label out to the amount column with 30+ spaces.
+    "opening": re.compile(r"opening\s+balance\D{0,80}?([\d,]+\.\d{2})", re.I),
+    "closing": re.compile(r"closing\s+balance\D{0,80}?([\d,]+\.\d{2})", re.I),
+    "withdrawals": re.compile(r"total\s+(?:withdrawals?|debits?|payments?)\D{0,80}?([\d,]+\.\d{2})", re.I),
+    "deposits": re.compile(r"total\s+(?:deposits?|credits?|receipts?)\D{0,80}?([\d,]+\.\d{2})", re.I),
+}
+
+
+def _printed_totals(lines: list[str]) -> dict[str, str]:
+    """The summary figures a statement prints about itself.
+
+    Deliberately takes the LAST occurrence of each: "Opening Balance" appears both
+    in the header block and again in the closing summary, and the summary is the
+    authoritative one.
+    """
+    totals: dict[str, str] = {}
+    for line in lines:
+        for name, pattern in _TOTAL_PATTERNS.items():
+            match = pattern.search(line)
+            if match:
+                totals[name] = match.group(1)
+    return totals
+
+
 def _reference_at(
     line: str, columns: dict[str, _Column], first_money_start: int
 ) -> Optional[str]:
@@ -130,6 +156,20 @@ def _reference_at(
 # and closing markers. Emitting these as zero-amount transactions pollutes the
 # reconciliation, and the opening one is more useful as the starting balance that
 # lets the first real row be audited.
+# Furniture that appears between transaction blocks on a multi-page statement. It is
+# indented like a narration and carries no amount, so without this it qualifies as a
+# continuation line and gets glued onto the last transaction's description — observed
+# as "NEFT CR:.../NORTH Statement continued on next page".
+_PAGE_FURNITURE = re.compile(
+    r"\b(page\s+\d+\s*(of|/)\s*\d+"
+    r"|continued\s+on\s+next\s+page|statement\s+continued|continued\.{0,3}$"
+    r"|statement\s+of\s+account"
+    r"|computer[\s-]?generated"
+    r"|account\s+(no|number|branch|holder|type)\s*:"
+    r"|ifsc|cust\s*id|statement\s+(from|period|to)\s*:)\b",
+    re.I,
+)
+
 _OPENING_ROW = re.compile(r"\b(opening\s+balance|balance\s+b/?f|brought\s+forward)\b", re.I)
 _CLOSING_ROW = re.compile(
     r"\b(closing\s+balance|balance\s+c/?f|carried\s+forward|total\s+(withdrawals?|deposits?))\b",
@@ -164,6 +204,13 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
             opening_balance = opening_match.group(1)
             break
 
+    # Statements print their own totals in a summary block. Captured here so
+    # extraction can be footed against them: the per-row balance audit proves each
+    # amount is right, but only totals prove no ROW was dropped.
+    printed_totals = _printed_totals(lines)
+    if opening_balance is None:
+        opening_balance = printed_totals.get("opening")
+
     money_columns = [columns[name] for name in ("debit", "credit", "balance") if name in columns]
     if not money_columns:
         return None
@@ -181,15 +228,31 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
             # description column to qualify: page footers and disclaimers start at
             # the left margin, and appending those to the last transaction corrupts
             # its description.
+            # A repeated column header, or page furniture between blocks, is not
+            # narration. On a multi-page statement both sit exactly where a wrapped
+            # narration would.
+            if _PAGE_FURNITURE.search(line) or _header_columns(line) == columns:
+                continue
+
             indent = len(line) - len(line.lstrip())
             description_start = columns["description"].start if "description" in columns else 0
+            # A continuation must carry no figure in the MONEY columns. Testing for
+            # a digit anywhere instead would discard the invoice and order numbers
+            # that wrapped narrations routinely carry ("SUPPLY PVT LTD/INV-1042") —
+            # precisely the text worth keeping, since it is what ties the row to a
+            # ledger entry.
+            carries_money = any(
+                m.start() >= first_money_start - _COLUMN_TOLERANCE
+                and (m.start() == 0 or line[m.start() - 1].isspace())
+                for m in _AMOUNT.finditer(line)
+            )
             # Must line up with the description column, give or take a couple of
             # characters. A generous tolerance here lets left-margin footers
             # ("This is a synthetic statement...") qualify as narration and get
             # glued onto the final transaction's description.
             if (
                 rows
-                and not _AMOUNT.search(line)
+                and not carries_money
                 and description_start > 0
                 and indent >= description_start - 2
             ):
@@ -283,7 +346,10 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
             }
         )
 
-    if rows and opening_balance is not None:
-        rows[0]["opening_balance"] = opening_balance
+    if rows:
+        if opening_balance is not None:
+            rows[0]["opening_balance"] = opening_balance
+        if printed_totals:
+            rows[0]["printed_totals"] = printed_totals
 
     return rows or None

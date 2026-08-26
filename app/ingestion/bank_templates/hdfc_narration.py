@@ -22,20 +22,37 @@ _NEFT_RTGS = re.compile(r"^(?:NEFT|RTGS)\s*(?:CR|DR)?\s*:\s*([A-Za-z0-9]+)/(.+?)
 _IMPS = re.compile(r"^IMPS[-/]([A-Za-z0-9]+)[-/](.+?)(?:[-/](.*))?$", re.I)
 _CHEQUE = re.compile(r"^CHQ\s+(?:PAID|DEP|ISSUED)?\s*0*([0-9]{3,})", re.I)
 _NACH = re.compile(r"^ACH\s+(?:DR|CR)[-/]NACH[-/](.+?)(?:[-/](.*))?$", re.I)
+# Bank-originated postings. These name no counterparty — the bank IS the
+# counterparty — and identifying them as such is what lets an unmatched row be
+# reported as an expected reconciling item rather than a discrepancy.
+_CHARGE = re.compile(r"^(?:HDFC\s+)?CHRG\b|^HDFC\s+CHRG\b", re.I)
+_INTEREST = re.compile(r"^INT\.?\s*(?:PD|CR)\b", re.I)
 
 # Identifiers shorter than this are too generic to be worth matching on.
 _MIN_REFERENCE_LENGTH = 5
 
 
 class ParsedNarration:
-    __slots__ = ("reference", "counterparty")
+    """A narration broken into the parts that matter for reconciliation.
 
-    def __init__(self, reference: str | None, counterparty: str | None):
+    `kind` says what the bank did (upi, neft, rtgs, imps, nach, cheque, charge,
+    interest), `reference` is the transaction id, and `counterparty` is who the
+    money moved to or from — matching against that is far sharper than against the
+    whole narration, which is mostly routing noise.
+    """
+
+    __slots__ = ("kind", "reference", "counterparty")
+
+    def __init__(self, kind: str | None, reference: str | None, counterparty: str | None):
+        self.kind = kind
         self.reference = reference
         self.counterparty = counterparty
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return f"ParsedNarration(reference={self.reference!r}, counterparty={self.counterparty!r})"
+        return (
+            f"ParsedNarration(kind={self.kind!r}, reference={self.reference!r}, "
+            f"counterparty={self.counterparty!r})"
+        )
 
 
 def parse_narration(description: str) -> ParsedNarration:
@@ -47,25 +64,32 @@ def parse_narration(description: str) -> ParsedNarration:
     """
     text = (description or "").strip()
     if not text:
-        return ParsedNarration(None, None)
+        return ParsedNarration(None, None, None)
 
-    for pattern in (_UPI, _NEFT_RTGS, _IMPS):
+    for kind, pattern in (("upi", _UPI), ("neft_rtgs", _NEFT_RTGS), ("imps", _IMPS)):
         match = pattern.match(text)
         if match:
             reference = match.group(1).strip()
             counterparty = (match.group(2) or "").strip()
             if len(reference) < _MIN_REFERENCE_LENGTH:
                 reference = None
-            return ParsedNarration(reference or None, counterparty or None)
+            if kind == "neft_rtgs":
+                kind = "rtgs" if text.upper().startswith("RTGS") else "neft"
+            return ParsedNarration(kind, reference or None, counterparty or None)
 
     match = _CHEQUE.match(text)
     if match:
         # Cheque numbers are printed with leading zeros on one side and not the
         # other, so the digits are what should be compared.
-        return ParsedNarration(match.group(1), None)
+        return ParsedNarration("cheque", match.group(1), None)
 
     match = _NACH.match(text)
     if match:
-        return ParsedNarration(None, match.group(1).strip() or None)
+        return ParsedNarration("nach", None, match.group(1).strip() or None)
 
-    return ParsedNarration(None, None)
+    if _CHARGE.match(text):
+        return ParsedNarration("charge", None, None)
+    if _INTEREST.match(text):
+        return ParsedNarration("interest", None, None)
+
+    return ParsedNarration(None, None, None)

@@ -158,6 +158,59 @@ def _reconcile_against_balances(
     return corrected[1:] if opening is not None else corrected
 
 
+def _foot_against_printed_totals(
+    rows: list[dict], amounts: list[Decimal], *, file_name: str
+) -> None:
+    """Check the extracted rows against the totals the document prints about itself.
+
+    Complements the per-row balance audit rather than repeating it. That proves each
+    amount agrees with its own balance movement, but it compares consecutive rows —
+    so if a row is missed entirely, the rows either side of the gap still appear
+    consistent and nothing objects. Footing to the printed totals is what catches a
+    dropped row, which is the failure most likely to go unnoticed and most damaging:
+    money silently absent from the reconciliation.
+
+    Silent when the document prints no totals; many ledgers do not.
+    """
+    if not rows:
+        return
+    totals = rows[0].get("printed_totals") or {}
+    opening = _parse_balance(totals.get("opening"))
+    closing = _parse_balance(totals.get("closing"))
+    extracted = sum(amounts, Decimal("0"))
+
+    if opening is not None and closing is not None:
+        expected = closing - opening
+        if extracted != expected:
+            raise PDFExtractionError(
+                f"Extraction from {file_name} does not foot. The rows read total "
+                f"{extracted}, but the statement's own figures require {expected} "
+                f"(opening {opening} to closing {closing}) — a difference of "
+                f"{expected - extracted}. A transaction was most likely missed or "
+                "double-counted, so the reconciliation was rejected rather than "
+                "built on incomplete data."
+            )
+        logger.info(
+            "%s foots: %d rows total %s, matching opening %s to closing %s",
+            file_name, len(amounts), extracted, opening, closing,
+        )
+        return
+
+    withdrawals = _parse_balance(totals.get("withdrawals"))
+    deposits = _parse_balance(totals.get("deposits"))
+    if withdrawals is not None and deposits is not None:
+        # Fall back to the movement totals. Direction is convention-dependent, so
+        # compare magnitudes: the point is that no row went missing.
+        expected = abs(deposits - withdrawals)
+        if abs(extracted) != expected:
+            raise PDFExtractionError(
+                f"Extraction from {file_name} does not foot. The rows read a net "
+                f"movement of {abs(extracted)}, but the printed totals "
+                f"(deposits {deposits}, withdrawals {withdrawals}) require "
+                f"{expected}. A transaction was most likely missed or double-counted."
+            )
+
+
 def parse_pdf(
     path: str | Path,
     *,
@@ -194,6 +247,7 @@ def parse_pdf(
         amounts.append(debit - credit if debit_is_inflow else credit - debit)
 
     amounts = _reconcile_against_balances(rows, amounts, file_name=resolved_name)
+    _foot_against_printed_totals(rows, amounts, file_name=resolved_name)
 
     transactions: list[Transaction] = []
     for raw_row, amount in zip(rows, amounts):
@@ -209,6 +263,8 @@ def parse_pdf(
 
         extractor_refs = getattr(template, "extra_references", None)
         alt_references = list(extractor_refs(description)) if extractor_refs else []
+        counterparty_of = getattr(template, "counterparty", None)
+        counterparty = counterparty_of(description) if counterparty_of else None
 
         transactions.append(
             Transaction(
@@ -216,6 +272,7 @@ def parse_pdf(
                 amount=amount,
                 description=description,
                 alt_references=alt_references,
+                counterparty=counterparty,
                 reference=str(reference).strip() if reference else None,
                 source=source,
                 file_name=resolved_name,

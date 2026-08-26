@@ -68,3 +68,23 @@ def test_template_exposes_narration_ids_for_matching() -> None:
     template = HDFCBankTemplate()
     assert template.extra_references("UPI/P2M/900000000001/SWIFTWAY EXPRESS/x") == ["900000000001"]
     assert template.extra_references("HDFC CHRG SMS ALERT 062026-072026") == []
+import pytest
+from app.ingestion.bank_templates.hdfc_narration import parse_narration
+
+@pytest.mark.parametrize("narration,kind", [
+    ("UPI/P2M/900000000001/SWIFTWAY EXPRESS/Courier chg", "upi"),
+    ("NEFT CR:HDFC0R0009992/NORTH SUPPLY PVT LTD/INV-1042", "neft"),
+    ("RTGS CR:HDFC0R0009993/PEAK TRADERS/Advance", "rtgs"),
+    ("IMPS-900000000005-DIVYA KAPOOR-Fee", "imps"),
+    ("CHQ PAID 000412", "cheque"),
+    ("ACH DR-NACH-OMNI HEALTH INS-Premium", "nach"),
+    ("HDFC CHRG SMS ALERT 062026-072026", "charge"),
+    ("INT.PD:01/04/26 TO 30/06/26", "interest"),
+])
+def test_narration_kind_is_classified(narration, kind):
+    """`kind` is what lets an unmatched bank charge be reported as an expected
+    reconciling item rather than an unexplained discrepancy."""
+    assert parse_narration(narration).kind == kind
+
+def test_unrecognised_narration_has_no_kind():
+    assert parse_narration("SOME UNFAMILIAR FORMAT 123").kind is None

@@ -194,3 +194,50 @@ def test_rightmost_reference_column_wins_over_an_internal_voucher_number() -> No
 
     assert rows[0]["reference"] == "900000000001"
     assert rows[1]["reference"] == "HDFC0R0009992025"
+
+
+_MULTIPAGE = """\
+HDFC BANK LIMITED
+      Account No             :  50100XXXXXX1234
+
+  Date       Narration                        Chq./Ref.No.      Withdrawal Amt.     Deposit Amt.   Closing Balance
+
+01/07/26     UPI/P2M/900000000001/SWIFTWAY    0000000000               1,180.00                        243,820.00
+03/07/26     NEFT CR:HDFC0R0009992/NORTH      N032025070399999                         84,500.00       328,320.00
+             SUPPLY PVT LTD/INV-1042
+
+                                                          Page 1 of 2
+                                        Statement continued on next page
+
+HDFC BANK LIMITED
+      Account No             :  50100XXXXXX1234
+
+  Date       Narration                        Chq./Ref.No.      Withdrawal Amt.     Deposit Amt.   Closing Balance
+
+05/07/26     CHQ PAID 000412                  000412                  22,000.00                        306,320.00
+
+                                                          Page 2 of 2
+"""
+
+
+def test_repeated_headers_and_page_furniture_do_not_become_transactions() -> None:
+    rows = parse_layout_table(_MULTIPAGE)
+    assert rows is not None
+    assert len(rows) == 3
+    assert [r["date"] for r in rows] == ["01/07/26", "03/07/26", "05/07/26"]
+
+
+def test_page_furniture_is_not_glued_onto_the_previous_narration() -> None:
+    rows = parse_layout_table(_MULTIPAGE)
+    assert rows is not None
+    assert not any("continued" in r["description"].lower() for r in rows)
+    assert not any("Page 1" in r["description"] for r in rows)
+
+
+def test_a_wrapped_narration_containing_a_number_is_still_kept() -> None:
+    """Invoice and order numbers routinely appear on the wrapped line, and they are
+    exactly the text that ties a row to a ledger entry — a digit anywhere must not
+    disqualify a continuation."""
+    rows = parse_layout_table(_MULTIPAGE)
+    assert rows is not None
+    assert rows[1]["description"] == "NEFT CR:HDFC0R0009992/NORTH SUPPLY PVT LTD/INV-1042"

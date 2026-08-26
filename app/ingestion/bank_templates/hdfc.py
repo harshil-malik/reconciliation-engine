@@ -62,5 +62,8 @@ class HDFCBankTemplate:
         reference = parse_narration(description).reference
         return [reference] if reference else []
 
+    def counterparty(self, description: str) -> str | None:
+        return parse_narration(description).counterparty
+
     def parse_response(self, response_text: str) -> list[dict]:
         return parse_json_rows(response_text)

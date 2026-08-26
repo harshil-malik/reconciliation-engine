@@ -34,6 +34,12 @@ class Transaction(BaseModel):
     # Kept alongside `reference` rather than replacing it: which form the ledger
     # records varies, so matching should be free to use either.
     alt_references: list[str] = Field(default_factory=list)
+    # Who the money moved to or from, pulled out of the narration where the format
+    # allows. Matching against this is sharper than against the whole narration,
+    # which is mostly routing noise: "UPI/P2M/900000000001/SWIFTWAY EXPRESS/Courier
+    # chg" shares little with "Swiftway Express - Courier charges" as raw strings,
+    # but their payees are plainly the same.
+    counterparty: Optional[str] = None
     source: Literal["bank", "ledger"]
     file_name: str
     raw_row: dict[str, Any]

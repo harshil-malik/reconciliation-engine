@@ -69,7 +69,7 @@ def test_build_report_produces_four_sheets_with_expected_rows() -> None:
     report_bytes = build_report(match_result, ai_match_result, anomaly_result)
 
     sheets = pd.read_excel(io.BytesIO(report_bytes), sheet_name=None)
-    assert set(sheets.keys()) == {"Matched", "AI Matched", "Unmatched", "Anomalies"}
+    assert set(sheets.keys()) == {"Summary", "Matched", "Needs Review", "AI Matched", "Unmatched - Bank", "Unmatched - Ledger", "Anomalies"}
 
     assert len(sheets["Matched"]) == 1
     assert sheets["Matched"].iloc[0]["rule"] == "exact_amount_same_date"
@@ -79,9 +79,11 @@ def test_build_report_produces_four_sheets_with_expected_rows() -> None:
     assert sheets["AI Matched"].iloc[0]["confidence"] == 0.9
     assert "fee" in sheets["AI Matched"].iloc[0]["reasoning"]
 
-    assert len(sheets["Unmatched"]) == 1
-    assert sheets["Unmatched"].iloc[0]["side"] == "bank"
-    assert sheets["Unmatched"].iloc[0]["txn_amount"] == 42.0
+    assert len(sheets["Unmatched - Bank"]) == 1
+    assert sheets["Unmatched - Bank"].iloc[0]["txn_amount"] == 42.0
+    # every unmatched row now says WHY, so a reviewer can tell an expected
+    # reconciling item from a discrepancy worth chasing
+    assert sheets["Unmatched - Bank"].iloc[0]["why_unmatched"]
 
     assert len(sheets["Anomalies"]) == 1
     assert sheets["Anomalies"].iloc[0]["rule"] == "just_below_approval_threshold"
@@ -96,9 +98,16 @@ def test_build_report_handles_empty_result_sets() -> None:
     report_bytes = build_report(match_result, ai_match_result, anomaly_result)
     sheets = pd.read_excel(io.BytesIO(report_bytes), sheet_name=None)
 
-    assert set(sheets.keys()) == {"Matched", "AI Matched", "Unmatched", "Anomalies"}
-    for df in sheets.values():
-        assert len(df) == 0
+    assert set(sheets.keys()) == {"Summary", "Matched", "Needs Review", "AI Matched", "Unmatched - Bank", "Unmatched - Ledger", "Anomalies"}
+    for name, df in sheets.items():
+        if name != "Summary":
+            assert len(df) == 0, name
+
+    # Summary is always present, even for an empty reconciliation: its job is to
+    # prove the books tie, and "nothing in, nothing unexplained" is a valid proof.
+    summary = sheets["Summary"]
+    unexplained = summary.loc[summary["item"] == "UNEXPLAINED", "amount"].iloc[0]
+    assert unexplained == 0.0
 
 
 def test_anomaly_flag_with_two_transactions_produces_two_rows_sharing_group_id() -> None:

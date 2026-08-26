@@ -134,7 +134,7 @@ def test_reconcile_runs_full_pipeline_and_returns_report() -> None:
     assert "reconciliation_report.xlsx" in response.headers["content-disposition"]
 
     sheets = pd.read_excel(io.BytesIO(response.content), sheet_name=None)
-    assert set(sheets.keys()) == {"Matched", "AI Matched", "Unmatched", "Anomalies"}
+    assert set(sheets.keys()) == {"Summary", "Matched", "Needs Review", "AI Matched", "Unmatched - Bank", "Unmatched - Ledger", "Anomalies"}
 
     matched = sheets["Matched"]
     rules = set(matched["rule"])
@@ -151,7 +151,7 @@ def test_reconcile_runs_full_pipeline_and_returns_report() -> None:
     assert len(matched) == 2
 
     assert len(sheets["AI Matched"]) == 0
-    assert len(sheets["Unmatched"]) == 0
+    assert len(sheets["Unmatched - Bank"]) == 0
 
 
 def test_reconcile_accepts_pdf_ledger_with_generic_ledger_template() -> None:

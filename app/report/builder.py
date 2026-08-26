@@ -7,6 +7,7 @@ import pandas as pd
 from app.ai_matching.models import AIMatchResult
 from app.anomaly.models import AnomalyResult
 from app.matching.models import MatchResult
+from app.report.classify import classify_unmatched, match_issue, reconciliation_summary
 from app.schema import Transaction
 
 
@@ -20,90 +21,56 @@ def _txn_fields(txn: Transaction, *, prefix: str) -> dict:
     }
 
 
-def _matched_sheet(match_result: MatchResult) -> pd.DataFrame:
+def _pair_row(pair) -> dict:
+    date_gap = abs((pair.bank_transaction.date - pair.ledger_transaction.date).days)
+    amount_gap = abs(pair.bank_transaction.amount - pair.ledger_transaction.amount)
+    row = {
+        "rule": pair.rule,
+        "corroboration": pair.corroboration,
+        "date_gap_days": date_gap,
+        "amount_difference": float(amount_gap),
+        "similarity": pair.similarity,
+    }
+    row.update(_txn_fields(pair.bank_transaction, prefix="bank"))
+    row.update(_txn_fields(pair.ledger_transaction, prefix="ledger"))
+    return row
+
+
+def _unmatched_rows(
+    transactions: list[Transaction], counterparties: list[Transaction]
+) -> list[dict]:
     rows = []
-    for pair in match_result.matched:
-        # `corroboration` is what a reviewer should scan first: rows marked
-        # amount_and_date_only rest on the figures alone, which is where two
-        # unrelated payments of the same size on the same day would be paired.
-        row = {
-            "rule": pair.rule,
-            "corroboration": pair.corroboration,
-            "similarity": pair.similarity,
-        }
-        row.update(_txn_fields(pair.bank_transaction, prefix="bank"))
-        row.update(_txn_fields(pair.ledger_transaction, prefix="ledger"))
-        rows.append(row)
-    return pd.DataFrame(rows)
+    for txn in transactions:
+        rows.append(
+            {
+                "why_unmatched": classify_unmatched(txn, counterparties),
+                **_txn_fields(txn, prefix="txn"),
+            }
+        )
+    return rows
 
 
-def _ai_matched_sheet(ai_match_result: AIMatchResult) -> pd.DataFrame:
-    rows = []
-    for pair in ai_match_result.ai_matched:
-        row = {"confidence": pair.confidence, "reasoning": pair.reasoning}
-        row.update(_txn_fields(pair.bank_transaction, prefix="bank"))
-        row.update(_txn_fields(pair.ledger_transaction, prefix="ledger"))
-        rows.append(row)
-    return pd.DataFrame(rows)
+_TRANSACTION_COLUMNS = ["{p}_date", "{p}_amount", "{p}_description", "{p}_reference", "{p}_file_name"]
 
 
-def _unmatched_sheet(ai_match_result: AIMatchResult) -> pd.DataFrame:
-    rows = []
-    for txn in ai_match_result.unmatched_bank:
-        rows.append({"side": "bank", **_txn_fields(txn, prefix="txn")})
-    for txn in ai_match_result.unmatched_ledger:
-        rows.append({"side": "ledger", **_txn_fields(txn, prefix="txn")})
-    return pd.DataFrame(rows)
-
-
-def _anomalies_sheet(anomaly_result: AnomalyResult) -> pd.DataFrame:
-    rows = []
-    for i, flag in enumerate(anomaly_result.flags):
-        group_id = f"A{i + 1:04d}"
-        for txn in flag.transactions:
-            rows.append(
-                {
-                    "group_id": group_id,
-                    "rule": flag.rule,
-                    "reason": flag.reason,
-                    "source": txn.source,
-                    **_txn_fields(txn, prefix="txn"),
-                }
-            )
-    return pd.DataFrame(rows)
+def _pair_columns(prefix_first: list[str]) -> list[str]:
+    columns = list(prefix_first)
+    for prefix in ("bank", "ledger"):
+        columns += [c.format(p=prefix) for c in _TRANSACTION_COLUMNS]
+    return columns
 
 
 _SHEET_COLUMNS = {
-    "Matched": [
-        "rule",
-        "corroboration",
-        "similarity",
-        "bank_date",
-        "bank_amount",
-        "bank_description",
-        "bank_reference",
-        "bank_file_name",
-        "ledger_date",
-        "ledger_amount",
-        "ledger_description",
-        "ledger_reference",
-        "ledger_file_name",
-    ],
-    "AI Matched": [
-        "confidence",
-        "reasoning",
-        "bank_date",
-        "bank_amount",
-        "bank_description",
-        "bank_reference",
-        "bank_file_name",
-        "ledger_date",
-        "ledger_amount",
-        "ledger_description",
-        "ledger_reference",
-        "ledger_file_name",
-    ],
-    "Unmatched": ["side", "txn_date", "txn_amount", "txn_description", "txn_reference", "txn_file_name"],
+    "Summary": ["item", "count", "amount", "note"],
+    "Matched": _pair_columns(
+        ["rule", "corroboration", "date_gap_days", "amount_difference", "similarity"]
+    ),
+    "Needs Review": _pair_columns(
+        ["issue", "rule", "corroboration", "date_gap_days", "amount_difference", "similarity"]
+    ),
+    "AI Matched": _pair_columns(["confidence", "reasoning"]),
+    "Unmatched - Bank": ["why_unmatched"] + [c.format(p="txn") for c in _TRANSACTION_COLUMNS],
+    "Unmatched - Ledger": ["why_unmatched"] + [c.format(p="txn") for c in _TRANSACTION_COLUMNS],
     "Anomalies": [
         "group_id",
         "rule",
@@ -123,24 +90,89 @@ def build_report(
     ai_match_result: AIMatchResult,
     anomaly_result: AnomalyResult,
 ) -> bytes:
-    """Builds the audit-ready reconciliation report as one .xlsx workbook, four tabs.
+    """Build the reconciliation workbook, organised by what a reviewer must DO.
 
-    Every row carries the rule that fired (Matched), the AI's confidence + reasoning
-    (AI Matched), or the anomaly rule + reason (Anomalies) — so a CA can see *why* a
-    row landed in its bucket without leaving the sheet.
+    The tabs are split by required action rather than by which stage produced a row.
+    An earlier layout put every pairing in one "Matched" tab and every leftover in
+    one "Unmatched" tab, which meant a clean exact match sat beside one resting on
+    figures alone, and an expected bank charge sat beside a genuine discrepancy —
+    two readers counted the same file differently because nothing said which was
+    which.
+
+    Summary            the balancing proof: is every rupee of difference accounted for
+    Matched            every pairing, with its date gap, amount gap and evidence
+    Needs Review       the subset a person should actually look at
+    AI Matched         model-asserted pairs, kept separate as they are the least certain
+    Unmatched - Bank   on the statement, not in the books, each with a reason
+    Unmatched - Ledger in the books, not on the statement, each with a reason
+    Anomalies          risk flags, which may also appear above (Stage 3 sees everything)
     """
+    matched = match_result.matched
+    bank_txns = [p.bank_transaction for p in matched] + ai_match_result.unmatched_bank + [
+        p.bank_transaction for p in ai_match_result.ai_matched
+    ]
+    ledger_txns = [p.ledger_transaction for p in matched] + ai_match_result.unmatched_ledger + [
+        p.ledger_transaction for p in ai_match_result.ai_matched
+    ]
+
+    needs_review = []
+    for pair in matched:
+        issue = match_issue(pair)
+        if issue:
+            needs_review.append({"issue": issue, **_pair_row(pair)})
+
+    ai_rows = []
+    for pair in ai_match_result.ai_matched:
+        row = {"confidence": pair.confidence, "reasoning": pair.reasoning}
+        row.update(_txn_fields(pair.bank_transaction, prefix="bank"))
+        row.update(_txn_fields(pair.ledger_transaction, prefix="ledger"))
+        ai_rows.append(row)
+
+    anomaly_rows = []
+    for index, flag in enumerate(anomaly_result.flags):
+        group_id = f"A{index + 1:04d}"
+        for txn in flag.transactions:
+            anomaly_rows.append(
+                {
+                    "group_id": group_id,
+                    "rule": flag.rule,
+                    "reason": flag.reason,
+                    "source": txn.source,
+                    **_txn_fields(txn, prefix="txn"),
+                }
+            )
+
     sheets = {
-        "Matched": _matched_sheet(match_result),
-        "AI Matched": _ai_matched_sheet(ai_match_result),
-        "Unmatched": _unmatched_sheet(ai_match_result),
-        "Anomalies": _anomalies_sheet(anomaly_result),
+        "Summary": pd.DataFrame(
+            reconciliation_summary(
+                bank_txns,
+                ledger_txns,
+                matched,
+                ai_match_result.unmatched_bank,
+                ai_match_result.unmatched_ledger,
+            )
+        ),
+        "Matched": pd.DataFrame([_pair_row(p) for p in matched]),
+        "Needs Review": pd.DataFrame(needs_review),
+        "AI Matched": pd.DataFrame(ai_rows),
+        "Unmatched - Bank": pd.DataFrame(
+            _unmatched_rows(ai_match_result.unmatched_bank, ledger_txns)
+        ),
+        "Unmatched - Ledger": pd.DataFrame(
+            _unmatched_rows(ai_match_result.unmatched_ledger, bank_txns)
+        ),
+        "Anomalies": pd.DataFrame(anomaly_rows),
     }
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        for sheet_name, df in sheets.items():
+        for sheet_name, frame in sheets.items():
             columns = _SHEET_COLUMNS[sheet_name]
-            df = df.reindex(columns=columns) if not df.empty else pd.DataFrame(columns=columns)
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            frame = (
+                frame.reindex(columns=columns)
+                if not frame.empty
+                else pd.DataFrame(columns=columns)
+            )
+            frame.to_excel(writer, sheet_name=sheet_name, index=False)
 
     return buffer.getvalue()

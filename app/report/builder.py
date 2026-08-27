@@ -18,6 +18,10 @@ def _txn_fields(txn: Transaction, *, prefix: str) -> dict:
         f"{prefix}_description": txn.description,
         f"{prefix}_reference": txn.reference,
         f"{prefix}_file_name": txn.file_name,
+        # Where in that file the row was read from, so a reviewer working in the
+        # workbook rather than the browser can still get back to the source line.
+        f"{prefix}_source": txn.source_ref.label if txn.source_ref else "",
+        f"{prefix}_source_text": txn.source_ref.text if txn.source_ref else "",
     }
 
 
@@ -50,7 +54,15 @@ def _unmatched_rows(
     return rows
 
 
-_TRANSACTION_COLUMNS = ["{p}_date", "{p}_amount", "{p}_description", "{p}_reference", "{p}_file_name"]
+_TRANSACTION_COLUMNS = [
+    "{p}_date",
+    "{p}_amount",
+    "{p}_description",
+    "{p}_reference",
+    "{p}_file_name",
+    "{p}_source",
+    "{p}_source_text",
+]
 
 
 def _pair_columns(prefix_first: list[str]) -> list[str]:

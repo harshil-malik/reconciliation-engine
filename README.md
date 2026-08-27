@@ -137,6 +137,32 @@ unrelated payments of the same size on the same day would be paired, so those ar
 rows worth a second look. They are labelled rather than withheld: measured on real
 data, no similarity threshold separates the wrong ones from the right ones.
 
+## Source grounding
+
+Every row the report shows — matched, unmatched or flagged — carries a **source
+citation**: which file it came from, where in that file, and the source line
+verbatim. In the browser each row opens onto it ("Show source"); in the workbook it
+is two columns per side (`bank_source`, `bank_source_text`, and the ledger
+equivalents). Alongside it sits the rule that fired and the corroboration label, so
+a reviewer sees *why* the row landed where it did and can check the claim against
+the document they uploaded.
+
+| Source | Citation | Example |
+| --- | --- | --- |
+| PDF (text layer) | page and line, a range when a narration wraps | `page 2, lines 37-38` |
+| CSV / Excel | the row number the spreadsheet itself shows (header is row 1) | `row 47` |
+| Read by the model | *no line* — stated plainly | `read by the model — no source line` |
+
+That last row matters. When the deterministic parser cannot read a layout and the
+model is asked instead, there is no line to point at, and the record says so rather
+than naming a plausible one. An invented citation is the exact failure this feature
+exists to prevent.
+
+One thing a citation deliberately does not hide: where the per-row balance audit
+corrected a misread figure, the cited line still shows what the statement *printed*,
+while the amount used is the corrected one. Both are on screen together — that
+disagreement is evidence a reviewer should see, not something to paper over.
+
 ## How correctness is checked
 
 The engine does not ask to be trusted. `scripts/verify_reconciliation.py` proves a
@@ -236,7 +262,7 @@ key in `.env`.
 source .venv/bin/activate && python -m pytest
 ```
 
-174 tests, fully offline — model clients run against an in-memory HTTP transport, so
+181 tests, fully offline — model clients run against an in-memory HTTP transport, so
 no llama.cpp server or API key is needed.
 
 Each test's docstring names the bug it exists for. Several encode failures found on

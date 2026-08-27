@@ -398,3 +398,53 @@ def test_oversized_upload_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert response.status_code == 413
     assert "larger than the" in response.json()["detail"]
+
+
+def test_preview_carries_a_source_citation_for_every_row() -> None:
+    """A flagged row a reviewer cannot trace back to the uploaded file is, in audit
+    terms, an unsourced claim. Every transaction the dashboard shows — matched,
+    unmatched, or flagged — has to name the file and the line it came from, and
+    carry that line verbatim."""
+    response = client.post(
+        "/reconcile/preview",
+        files={
+            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
+            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+
+    sides = [p["bank"] for p in body["matched"]] + [p["ledger"] for p in body["matched"]]
+    assert sides, "expected matched rows to check"
+    for txn in sides:
+        ref = txn["source_ref"]
+        assert ref["kind"] == "sheet_row"
+        assert ref["line_start"] >= 2  # header is row 1
+        assert ref["label"] == f"row {ref['line_start']}"
+        assert ref["text"], "the source line must be carried, not just located"
+        assert txn["file_name"] in ("bank.csv", "ledger.csv")
+
+    # The rule that fired is what makes the citation actionable rather than trivia.
+    assert all(p["rule"] for p in body["matched"])
+    assert all(p["corroboration"] for p in body["matched"])
+
+
+def test_source_citation_survives_into_the_workbook() -> None:
+    """A CA working in Excel rather than the browser still needs the path back to
+    the document, so the locator and the source line are columns, not just JSON."""
+    response = client.post(
+        "/reconcile",
+        files={
+            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
+            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
+        },
+    )
+    assert response.status_code == 200
+
+    matched = pd.read_excel(io.BytesIO(response.content), sheet_name="Matched")
+    for prefix in ("bank", "ledger"):
+        assert f"{prefix}_source" in matched.columns
+        assert f"{prefix}_source_text" in matched.columns
+        assert matched[f"{prefix}_source"].str.startswith("row ").all()
+        assert matched[f"{prefix}_source_text"].str.len().gt(0).all()

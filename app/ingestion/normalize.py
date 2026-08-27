@@ -6,7 +6,7 @@ import pandas as pd
 
 from app.ingestion.amounts import to_decimal
 from app.ingestion.column_mapping import detect_columns
-from app.schema import Transaction
+from app.schema import SourceRef, Transaction
 
 
 def _clean_cell(value: object) -> object:
@@ -46,7 +46,11 @@ def normalize_dataframe(
     mapping = detect_columns(df)
     transactions: list[Transaction] = []
 
-    for _, row in df.iterrows():
+    # Numbered the way the spreadsheet numbers them: the header occupies row 1, so
+    # the first data row is row 2. Citing the DataFrame's own 0-based index would
+    # send a reviewer two rows off, which is worse than citing nothing.
+    for offset, (_, row) in enumerate(df.iterrows()):
+        sheet_row = offset + 2
         raw_row = {k: _clean_cell(v) for k, v in row.items()}
 
         parsed_date = pd.to_datetime(
@@ -75,6 +79,16 @@ def normalize_dataframe(
                 reference=reference,
                 source=source,
                 file_name=file_name,
+                source_ref=SourceRef(
+                    kind="sheet_row",
+                    line_start=sheet_row,
+                    line_end=sheet_row,
+                    # The cells as printed, in column order — the row the reviewer
+                    # will see if they open the file and go to that line.
+                    text=" | ".join(
+                        f"{k}: {v}" for k, v in raw_row.items() if v not in (None, "")
+                    ),
+                ),
                 raw_row=raw_row,
             )
         )

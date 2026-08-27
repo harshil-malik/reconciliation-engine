@@ -479,6 +479,11 @@ def _txn_summary(txn: Transaction) -> dict:
         "description": txn.description,
         "reference": txn.reference,
         "source": txn.source,
+        "file_name": txn.file_name,
+        # The provenance record, so the dashboard can offer a click-through from any
+        # flagged row to the line of the uploaded file that produced it. An
+        # unsourced figure is worth little to a reviewer who has to stand behind it.
+        "source_ref": txn.source_ref.model_dump() if txn.source_ref else None,
     }
 
 

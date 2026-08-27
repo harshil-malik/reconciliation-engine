@@ -82,7 +82,7 @@ class LocalPDFExtractor:
         self._max_tokens = max_tokens
 
     def extract(self, pdf_bytes: bytes, prompt: str) -> str:
-        text = _pdf_text(pdf_bytes)
+        text, page_starts = _pdf_text(pdf_bytes)
         if not text.strip():
             raise LlamaCppServerError(
                 "No text layer found in this PDF — it looks scanned/image-based, "
@@ -96,7 +96,7 @@ class LocalPDFExtractor:
         # guesses, and was observed reporting running balances as transaction
         # amounts and putting every deposit in the withdrawal column. The model
         # stays as the fallback for layouts this cannot parse.
-        rows = parse_layout_table(text)
+        rows = parse_layout_table(text, page_starts)
         if rows:
             logger.info("Parsed %d rows from the PDF table layout, without the model", len(rows))
             return json.dumps({"rows": rows})
@@ -115,8 +115,12 @@ class LocalPDFExtractor:
         )
 
 
-def _pdf_text(pdf_bytes: bytes) -> str:
+def _pdf_text(pdf_bytes: bytes) -> tuple[str, list[int]]:
     """Extract the PDF's text with column geometry preserved as far as possible.
+
+    Returns the text and the line index each page starts at. The pages are flattened
+    into one string so the table parser can follow a table across a page break, which
+    loses the page number a citation needs — the offsets hand it back.
 
     `extraction_mode="layout"` reproduces the page's spatial arrangement using
     whitespace, so a statement's columns stay visually aligned. The default mode
@@ -130,16 +134,26 @@ def _pdf_text(pdf_bytes: bytes) -> str:
     """
     from pypdf import PdfReader
 
+    def joined(mode: str | None) -> tuple[str, list[int]]:
+        pages = [
+            (page.extract_text(extraction_mode=mode) if mode else page.extract_text()) or ""
+            for page in reader.pages
+        ]
+        starts: list[int] = []
+        cursor = 0
+        for page_text in pages:
+            starts.append(cursor)
+            cursor += len(page_text.split("\n"))
+        return "\n".join(pages), starts
+
     reader = PdfReader(io.BytesIO(pdf_bytes))
     try:
-        text = "\n".join(
-            page.extract_text(extraction_mode="layout") or "" for page in reader.pages
-        )
+        text, starts = joined("layout")
         if text.strip():
-            return text
+            return text, starts
     except Exception:  # noqa: BLE001 - layout mode is best-effort, plain is the floor
         pass
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    return joined(None)
 
 
 class ClaudeVisionExtractor:

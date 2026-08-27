@@ -241,3 +241,57 @@ def test_a_wrapped_narration_containing_a_number_is_still_kept() -> None:
     rows = parse_layout_table(_MULTIPAGE)
     assert rows is not None
     assert rows[1]["description"] == "NEFT CR:HDFC0R0009992/NORTH SUPPLY PVT LTD/INV-1042"
+
+
+def test_rows_carry_the_line_they_were_read_from() -> None:
+    """Every flagged row needs a path back to the line that produced it.
+
+    Without this a reviewer has to take the engine's figures on trust, which in an
+    audit makes them worth very little.
+    """
+    text = "\n".join([
+        "HDFC BANK LTD",
+        "  Date       Narration                    Chq./Ref.No.   Withdrawal Amt.   Deposit Amt.   Closing Balance",
+        "  01/07/26   UPI-RAJESH TRADERS           UPI2241              12,450.00                     117,550.00",
+        "  02/07/26   NEFT-GLOBEX SUPPLIES         NFT8340                              8,340.50      125,890.50",
+    ])
+    rows = parse_layout_table(text)
+
+    assert rows is not None and len(rows) == 2
+    # 1-based, as a person counts lines: the header sits on line 2.
+    assert [r["source_line_start"] for r in rows] == [3, 4]
+    assert all(r["source_line_end"] == r["source_line_start"] for r in rows)
+    assert "UPI2241" in rows[0]["source_text"]
+    assert "NFT8340" in rows[1]["source_text"]
+
+
+def test_wrapped_narration_extends_the_cited_line_range() -> None:
+    """A citation covering only the first line points at a partial narration, so the
+    reviewer sees less than the engine read and cannot tell why the row matched."""
+    text = "\n".join([
+        "  Date       Narration                    Chq./Ref.No.   Withdrawal Amt.   Deposit Amt.   Closing Balance",
+        "  01/07/26   UPI-RAJESH TRADERS           UPI2241              12,450.00                     117,550.00",
+        "             INV-2241 SETTLEMENT",
+    ])
+    rows = parse_layout_table(text)
+
+    assert rows is not None and len(rows) == 1
+    assert rows[0]["source_line_start"] == 2
+    assert rows[0]["source_line_end"] == 3
+    assert "INV-2241 SETTLEMENT" in rows[0]["source_text"]
+    assert rows[0]["source_text"].count("\n") == 1
+
+
+def test_page_offsets_put_a_row_on_the_right_page() -> None:
+    """Pages are flattened into one string so a table can be followed across a page
+    break, which loses the page number a citation needs. The offsets hand it back."""
+    text = "\n".join([
+        "  Date       Narration                    Chq./Ref.No.   Withdrawal Amt.   Deposit Amt.   Closing Balance",
+        "  01/07/26   UPI-RAJESH TRADERS           UPI2241              12,450.00                     117,550.00",
+        "  02/07/26   NEFT-GLOBEX SUPPLIES         NFT8340                              8,340.50      125,890.50",
+    ])
+    # Second page begins at line index 2.
+    rows = parse_layout_table(text, [0, 2])
+
+    assert rows is not None
+    assert [r["source_page"] for r in rows] == [1, 2]

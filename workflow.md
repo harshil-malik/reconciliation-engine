@@ -106,6 +106,14 @@ Roughly in order of value:
   reconcile routes take an `anomaly_config` JSON field and `GET /anomaly-config`
   returns the defaults to edit — but nothing stores it, so an engagement's thresholds
   have to be re-sent every run.
+- **Source grounding, tiers 2 and 3.** Tier 1 (file + page/line + verbatim text) is
+  built. Tier 2 would add cell bounding boxes: measured on the real statement,
+  pypdf's `visitor_text` hook yields 160 positioned fragments across 31 y-rows with
+  23 distinct x positions, so per-cell coordinates are available with no new
+  dependency. Tier 3 (a rendered page image with the cell highlighted) needs a
+  rasteriser — PyMuPDF or pdf2image — and is the only part that does. Consider
+  whether it earns the dependency: highlighting the character range in the source
+  line already shown may serve a reviewer as well, and works for CSV and Excel too.
 - **Scanned PDF support** — needs OCR or a hosted vision extractor. Currently
   refused with a clear error, a defensible v1 position.
 - **Stage 3's AI layer** — specced, never built. Rules only. Keep it strictly

@@ -401,6 +401,35 @@
   .unmatched-card .desc { font-size: 13px; margin: 4px 0 6px; }
   .unmatched-card .reason { font-size: 12px; color: var(--text-muted); }
 
+  /* Source grounding: every flagged row opens onto the line of the uploaded file
+     that produced it. In audit an unsourced figure is worth little — a reviewer has
+     to be able to see the original text, not a restatement of it. */
+  .source-details { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 8px; }
+  .source-details > summary {
+    cursor: pointer; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted); user-select: none; list-style: none;
+  }
+  .source-details > summary::-webkit-details-marker { display: none; }
+  .source-details > summary::before { content: "▸ "; display: inline-block; width: 12px; }
+  .source-details[open] > summary::before { content: "▾ "; }
+  .source-details > summary:hover { color: var(--text); }
+  .source-block { margin-top: 8px; }
+  .source-head {
+    font-size: 11px; color: var(--text-muted); margin-bottom: 3px;
+    display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline;
+  }
+  .source-loc { font-weight: 600; color: var(--text); }
+  .source-text {
+    font-size: 11.5px; line-height: 1.5; white-space: pre; overflow-x: auto;
+    background: var(--code-bg, rgba(127,127,127,0.09));
+    border: 1px solid var(--border); border-radius: 4px; padding: 7px 9px; margin: 0;
+  }
+  .source-missing { font-size: 12px; color: var(--text-muted); font-style: italic; }
+  .source-rule {
+    font-size: 11px; color: var(--text-muted); margin-bottom: 8px;
+  }
+  .source-rule b { color: var(--text); font-weight: 600; }
+
   .anomaly-card {
     border-radius: 10px;
     padding: 14px 18px;
@@ -703,6 +732,49 @@
     ));
   }
 
+  // ---------- source grounding ----------
+
+  // One side's provenance: which file, where in it, and the line itself verbatim.
+  // Printed rather than paraphrased — the point is that the reviewer reads what the
+  // engine read, and can check it against the document they uploaded.
+  function sourceBlock(label, txn) {
+    const ref = txn.source_ref;
+    const file = escapeHtml(txn.file_name || "");
+    if (!ref) {
+      return `<div class="source-block"><div class="source-head">${label} · ${file}</div>
+        <div class="source-missing">No source record for this row.</div></div>`;
+    }
+    // A row the model read has no line to point at. Saying so is the honest answer;
+    // inventing a plausible line number would be exactly the unsourced claim this
+    // feature exists to remove.
+    const body = ref.text
+      ? `<pre class="source-text">${escapeHtml(ref.text)}</pre>`
+      : `<div class="source-missing">${escapeHtml(ref.label)}</div>`;
+    return `<div class="source-block">
+      <div class="source-head">${label} · ${file} · <span class="source-loc">${escapeHtml(ref.label)}</span></div>
+      ${ref.text ? body : body}
+    </div>`;
+  }
+
+  function pairSource(pair) {
+    const rule = RULE_LABELS[pair.rule] || pair.rule;
+    const corr = pair.corroboration ? ` · evidence: <b>${escapeHtml(pair.corroboration.replace(/_/g, " "))}</b>` : "";
+    return `<details class="source-details">
+      <summary>Show source</summary>
+      <div class="source-rule">Rule that fired: <b>${escapeHtml(rule)}</b>${corr}</div>
+      ${sourceBlock("BANK", pair.bank)}
+      ${sourceBlock("LEDGER", pair.ledger)}
+    </details>`;
+  }
+
+  function txnSource(txn, ruleLine) {
+    return `<details class="source-details">
+      <summary>Show source</summary>
+      ${ruleLine ? `<div class="source-rule">${ruleLine}</div>` : ""}
+      ${sourceBlock(String(txn.source || "").toUpperCase(), txn)}
+    </details>`;
+  }
+
   // ---------- results rendering ----------
 
   function renderMatched(pairs) {
@@ -722,6 +794,7 @@
           <div></div>
         </div>
         ${pair.issue ? `<div class="reasoning">${escapeHtml(pair.issue)}</div>` : ""}
+        ${pairSource(pair)}
       </div>
     `).join("");
   }
@@ -782,6 +855,12 @@
           <div></div>
         </div>
         <div class="reasoning">"${escapeHtml(pair.reasoning)}"</div>
+        <details class="source-details">
+          <summary>Show source</summary>
+          <div class="source-rule">Rule that fired: <b>AI confirmation</b> · confidence <b>${Math.round(pair.confidence * 100)}%</b></div>
+          ${sourceBlock("BANK", pair.bank)}
+          ${sourceBlock("LEDGER", pair.ledger)}
+        </details>
       </div>
     `).join("");
   }
@@ -793,6 +872,7 @@
             <div class="top-row"><span style="color:var(--text-muted);">${txn.date}</span><span style="font-weight:600;">${fmtAmount(txn.amount)}</span></div>
             <div class="desc">${escapeHtml(txn.description)}</div>
             <div class="reason">${escapeHtml(txn.reason)}</div>
+            ${txnSource(txn, `Why unmatched: <b>${escapeHtml(txn.reason || "")}</b>`)}
           </div>
         `).join("")
       : `<div class="empty-state">None.</div>`;
@@ -819,6 +899,11 @@
             <span class="anomaly-amount">${fmtAmount(total)}${countSuffix}</span>
           </div>
           <div class="anomaly-reason">${escapeHtml(flag.reason)}</div>
+          <details class="source-details">
+            <summary>Show source${flag.transactions.length > 1 ? ` (${flag.transactions.length} rows)` : ""}</summary>
+            <div class="source-rule">Rule that fired: <b>${escapeHtml(ANOMALY_LABELS[flag.rule] || flag.rule)}</b></div>
+            ${flag.transactions.map((t) => sourceBlock(String(t.source || "").toUpperCase(), t)).join("")}
+          </details>
         </div>
       `;
     }).join("");

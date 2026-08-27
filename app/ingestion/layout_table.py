@@ -177,8 +177,30 @@ _CLOSING_ROW = re.compile(
 )
 
 
-def parse_layout_table(text: str) -> Optional[list[dict]]:
+def _page_of(line_index: int, page_starts: Optional[list[int]]) -> Optional[int]:
+    """Which 1-based page a line index falls on, given each page's first line."""
+    if not page_starts:
+        return None
+    page = 1
+    for number, start in enumerate(page_starts, start=1):
+        if line_index >= start:
+            page = number
+        else:
+            break
+    return page
+
+
+def parse_layout_table(
+    text: str, page_starts: Optional[list[int]] = None
+) -> Optional[list[dict]]:
     """Parse an aligned transaction table out of layout-extracted PDF text.
+
+    Each row also carries where it was read from — `source_page`, `source_line_start`,
+    `source_line_end` (1-based, and a range when a narration wraps) and `source_text`,
+    the line(s) verbatim. That provenance is what lets a reviewer click a flagged row
+    and land on the line in the statement that produced it, instead of taking the
+    figure on trust. `page_starts` gives the first line index of each page, since the
+    caller flattens the document to one string before parsing.
 
     Returns row dicts in the same shape the model is asked to produce, or None when
     no aligned table is found — in which case the caller should fall back to the
@@ -217,7 +239,7 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
     first_money_start = min(column.start for column in money_columns)
 
     rows: list[dict] = []
-    for line in lines[header_index + 1 :]:
+    for line_index, line in enumerate(lines[header_index + 1 :], start=header_index + 1):
         if not line.strip():
             continue
 
@@ -259,6 +281,11 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
                 extra = line[:first_money_start].strip()
                 if extra:
                     rows[-1]["description"] = f"{rows[-1]['description']} {extra}".strip()
+                    # The citation must cover every line the description was built
+                    # from, otherwise it points at a partial narration and the
+                    # reviewer sees less than the engine read.
+                    rows[-1]["source_line_end"] = line_index + 1
+                    rows[-1]["source_text"] = f"{rows[-1]['source_text']}\n{line}"
             continue
 
         # Candidate money tokens: a real table cell is whitespace-delimited, so a run
@@ -343,6 +370,10 @@ def parse_layout_table(text: str) -> Optional[list[dict]]:
                 "debit": values.get("debit", "0"),
                 "credit": values.get("credit", "0"),
                 "balance": values.get("balance"),
+                "source_page": _page_of(line_index, page_starts),
+                "source_line_start": line_index + 1,
+                "source_line_end": line_index + 1,
+                "source_text": line,
             }
         )
 

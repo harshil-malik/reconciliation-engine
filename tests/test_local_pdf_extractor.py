@@ -50,7 +50,10 @@ def _blank_pdf_bytes() -> bytes:
 
 def test_extract_sends_template_prompt_and_pdf_text(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        vision_client, "_pdf_text", lambda _: "01/04/24  VENDOR PAYMENT  15,000.00"
+        vision_client,
+        "_pdf_text",
+        # (text, page_starts) — the offsets are what let a citation name a page.
+        lambda _: ("01/04/24  VENDOR PAYMENT  15,000.00", [0]),
     )
     captured: dict = {}
 
@@ -75,7 +78,9 @@ def test_extractor_output_parses_through_the_bank_template(
 ) -> None:
     """The contract that matters: what the local extractor returns must flow through
     the existing template + normalization path into canonical Transactions."""
-    monkeypatch.setattr(vision_client, "_pdf_text", lambda _: "some statement text")
+    monkeypatch.setattr(
+        vision_client, "_pdf_text", lambda _: ("some statement text", [0])
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

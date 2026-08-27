@@ -11,7 +11,7 @@ import pandas as pd
 from app.ingestion.amounts import to_decimal
 from app.ingestion.bank_templates.base import BankPDFTemplate
 from app.ingestion.vision_client import VisionExtractor
-from app.schema import Transaction
+from app.schema import SourceRef, Transaction
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +273,20 @@ def parse_pdf(
         counterparty_of = getattr(template, "counterparty", None)
         counterparty = counterparty_of(description) if counterparty_of else None
 
+        # Only the deterministic layout parser knows where a row sat. When the
+        # model read the table instead there is no line to cite, and the record says
+        # so rather than pointing at a line that may not be the right one.
+        if raw_row.get("source_line_start") is not None:
+            source_ref = SourceRef(
+                kind="pdf_line",
+                page=raw_row.get("source_page"),
+                line_start=raw_row.get("source_line_start"),
+                line_end=raw_row.get("source_line_end"),
+                text=str(raw_row.get("source_text") or ""),
+            )
+        else:
+            source_ref = SourceRef(kind="model_extracted")
+
         transactions.append(
             Transaction(
                 date=parsed_date,
@@ -283,6 +297,7 @@ def parse_pdf(
                 reference=str(reference).strip() if reference else None,
                 source=source,
                 file_name=resolved_name,
+                source_ref=source_ref,
                 raw_row=raw_row,
             )
         )

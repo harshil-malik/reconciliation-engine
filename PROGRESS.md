@@ -61,7 +61,7 @@ the value.
 
 ## Verified working
 
-- **191 tests**, fully offline (model clients use `httpx.MockTransport`).
+- **192 tests**, fully offline (model clients use `httpx.MockTransport`).
 - **Real HDFC statement + client ledger** reconcile correctly: 15 matched by Stage 1,
   1 by Stage 1.5 (a deliberate ₹500 typo), 0 needed the model, and the 3 remaining
   rows are genuine reconciling items — two un-booked bank charges and a deposit in
@@ -227,7 +227,7 @@ cd ~/v-01
 pgrep -fl llama-server                     # both model servers up?
 curl -s localhost:8080/health              # chat  (binds only after weights load)
 curl -s localhost:8081/health              # embeddings
-source .venv/bin/activate && python -m pytest -q          # expect 191 passed
+source .venv/bin/activate && python -m pytest -q          # expect 192 passed
 python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \
                                         sample_data/internal_ledger.pdf
 git log --oneline | head -5

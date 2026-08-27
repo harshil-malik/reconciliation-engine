@@ -283,7 +283,7 @@ key in `.env`.
 source .venv/bin/activate && python -m pytest
 ```
 
-191 tests, fully offline — model clients run against an in-memory HTTP transport, so
+192 tests, fully offline — model clients run against an in-memory HTTP transport, so
 no llama.cpp server or API key is needed.
 
 Each test's docstring names the bug it exists for. Several encode failures found on

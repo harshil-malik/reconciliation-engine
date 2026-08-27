@@ -18,6 +18,25 @@ DEFAULT_EMBEDDING_SERVER_URL = "http://127.0.0.1:8081"
 # call can legitimately run well past a minute, so the default timeout is generous.
 DEFAULT_TIMEOUT_SECONDS = 300.0
 
+# temperature=0 alone does NOT make llama-server reproducible. Measured on this
+# setup: across five runs of scripts/eval_confirmer.py one pair scored 0.30 on the
+# first and 0.80 on the next four, straddling Stage 2's 0.5 confidence threshold —
+# the same two rows would be AI-matched or not depending on the run. Greedy sampling
+# fixes which token wins a comparison, not the logits being compared: llama-server
+# reuses KV-cache prefixes between requests by default, and a differing cache state
+# perturbs them enough to flip a close call. Pinning the seed and refusing cache
+# reuse removes both sources. A reconciliation an auditor may have to re-run must
+# come back the same.
+#
+# Refusing cache reuse costs 1.62x on the eval's 15 calls (24.2s vs 14.9s), measured.
+# Cheap in practice: Stage 2 decides roughly one row in sixteen and has fired on no
+# real dataset since Stage 1.5 landed, and the deterministic table parser means the
+# extraction fallback that shares this method has not been needed either. Whether the
+# seed alone would be enough was not established — the divergence showed up once in
+# five runs, so a single clean comparison would not prove it, and reproducibility is
+# worth more here than the seconds.
+DEFAULT_SEED = 0
+
 _START_SERVER_HINT = (
     "Could not reach the llama.cpp server at {url}. Start it with:\n"
     "  llama-server -hf Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M --port 8080 -c 8192\n"
@@ -102,6 +121,7 @@ class LlamaCppClient:
         json_schema: dict[str, Any],
         max_tokens: int = 512,
         temperature: float = 0.0,
+        seed: int = DEFAULT_SEED,
     ) -> str:
         """Prompt the model with grammar-constrained decoding against `json_schema`.
 
@@ -115,8 +135,12 @@ class LlamaCppClient:
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
             # Deterministic by default: reconciliation output should be reproducible
-            # for the same inputs, which an auditor may reasonably expect.
+            # for the same inputs, which an auditor may reasonably expect. All three
+            # settings are needed — see DEFAULT_SEED above for what temperature=0 on
+            # its own was measured to miss.
             "temperature": temperature,
+            "seed": seed,
+            "cache_prompt": False,
             "max_tokens": max_tokens,
             "response_format": {
                 "type": "json_schema",

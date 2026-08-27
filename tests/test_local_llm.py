@@ -140,3 +140,26 @@ def test_local_match_confirmer_parses_constrained_json() -> None:
     assert result.is_match is True
     assert result.confidence == 0.82
     assert result.reasoning == "Same vendor and amount."
+
+
+def test_complete_json_pins_seed_and_refuses_prompt_cache_reuse() -> None:
+    """temperature=0 alone did not make the server reproducible.
+
+    Measured across five runs of scripts/eval_confirmer.py: one pair scored 0.30 on
+    the first run and 0.80 on the next four, straddling Stage 2's 0.5 confidence
+    threshold, so the same two rows were AI-matched or not depending on the run.
+    Greedy sampling fixes which token wins a comparison, not the logits being
+    compared — llama-server reuses KV-cache prefixes between requests by default,
+    and a differing cache state perturbs them enough to flip a close call.
+    """
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return _chat_response('{"ok": true}')
+
+    _client(handler).complete_json("hello", json_schema={"type": "object"})
+
+    assert captured["body"]["temperature"] == 0.0
+    assert captured["body"]["seed"] == 0
+    assert captured["body"]["cache_prompt"] is False

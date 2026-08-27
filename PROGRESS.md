@@ -163,11 +163,19 @@ between a bare payee and a full narration. Extracted and surfaced, not used.
 
 ## Honest assessment of the 3B model
 
-Stable at `temperature=0` (5/5 identical reruns) and, in the final configuration,
-never a false positive — the failure mode that matters. But recall was 6/8 on the
-eval, confidence output is coarse (effectively 0.0/0.2/0.5/0.8), and it is fragile to
-phrasing: one intermediate prompt revision swung it to 4 false positives out of 7
-negatives. **Never change the confirmer prompt without re-running the eval script.**
+Reproducible, but only once pinned. `temperature=0` alone was *not* enough: across
+five eval runs one pair scored 0.30 on the first and 0.80 on the next four, which
+straddles the 0.5 confidence threshold — the same two rows would be AI-matched or not
+depending on the run. Greedy sampling fixes which token wins a comparison, not the
+logits being compared, and llama-server reuses KV-cache prefixes between requests by
+default. With `seed` pinned and `cache_prompt: false` (`app/local_llm.py`) five runs
+are byte-identical. Never a false positive in any run — the failure mode that
+matters.
+
+But recall was 6/8 on the eval, confidence output is coarse (effectively
+0.0/0.2/0.5/0.8), and it is fragile to phrasing: one intermediate prompt revision
+swung it to 4 false positives out of 7 negatives. **Never change the confirmer
+prompt without re-running the eval script.**
 
 If more is needed, try a 7B/8B local GGUF (a one-line model path change) before
 reaching for a hosted API. Fine-tuning is not warranted — the model decides roughly

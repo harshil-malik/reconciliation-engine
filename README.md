@@ -1,28 +1,35 @@
 # Reconciliation Engine
 
-AI-powered bank-statement-vs-ledger reconciliation for chartered accountants. Ingests
-financial records in multiple formats, normalizes them, matches transactions
-deterministically first with AI as a fallback net, flags anomalies, and exports an
-audit-ready Excel report where every row is traceable to *why* it landed in its bucket.
+Bank-statement-vs-ledger reconciliation for chartered accountants. Ingests financial
+records in several formats, normalizes them, matches transactions deterministically,
+flags anomalies, and produces an audit-ready result where every row is traceable to
+*why* it landed where it did.
 
-Runs **fully offline** by default against a local Qwen model served by llama.cpp — no
-API key, and client financial data never leaves the machine doing the reconciliation.
+Runs **fully offline** against a local Qwen model served by llama.cpp. No API key, no
+telemetry, and nothing — not even a webfont — leaves the machine holding the client's
+financial data.
 
 See `reconciliation-engine-spec.md` for the design rationale behind each stage.
 
 ## Pipeline
 
-| Stage | What it does | Module |
-| --- | --- | --- |
-| 0 — Ingestion | CSV / Excel / PDF → canonical `Transaction` schema | `app/ingestion/` |
-| 1 — Deterministic matching | Exact amount → date tolerance → fuzzy description tiebreak. No AI, fully explainable. | `app/matching/` |
-| 2 — AI matching net | Only Stage 1's leftovers: embeddings shortlist, then LLM confirmation with a reasoning string. | `app/ai_matching/` |
-| 3 — Anomaly detection | Duplicates, threshold avoidance, round numbers, reversals, timing gaps — across the *full* reconciled set. | `app/anomaly/` |
-| Report | One `.xlsx`, four tabs: Matched / AI Matched / Unmatched / Anomalies. | `app/report/` |
+| Stage | What it does | Model? | Module |
+| --- | --- | --- | --- |
+| 0 — Ingestion | CSV / Excel / PDF → canonical `Transaction` | No | `app/ingestion/` |
+| 1 — Matching | Exact amount → date tolerance → fuzzy tiebreak | No | `app/matching/` |
+| 1.5 — Near-matching | Fee/rounding-sized gaps with a corresponding payee | No | `app/matching/near_matcher.py` |
+| 2 — AI net | Embeddings shortlist → LLM confirmation, on Stage 1.5's leftovers | Yes | `app/ai_matching/` |
+| 3 — Anomalies | Duplicates, threshold avoidance, round numbers, reversals, timing gaps — across the *full* reconciled set | No | `app/anomaly/` |
+| Report | Nine-tab `.xlsx` plus a browser dashboard | — | `app/report/` |
 
-Stages 2 and 3 are deliberately kept separate: a missed match wastes a CA's time, a
-missed anomaly hides risk. The CA review queue splits into "couldn't match" and
-"flagged as suspicious" so it's obvious which kind of attention each row needs.
+Stages 2 and 3 are deliberately separate: a missed match wastes an accountant's time,
+a missed anomaly hides risk. The review queue splits into "couldn't match" and
+"flagged as suspicious" so it is obvious which kind of attention each row needs.
+
+**The model does very little.** Stage 1.5 was measured against Stage 2 and replaced
+100% of its output on every dataset tested, including a real statement. Stage 2
+remains only for semantic linkage string comparison cannot reach. Treat it as a
+rarely-firing backstop.
 
 ## Setup
 
@@ -40,37 +47,9 @@ pip install -r requirements.txt
 brew install llama.cpp          # macOS; see llama.cpp's repo for other platforms
 ```
 
-### 3. Start the two model servers
+### 3. Download the model weights
 
-llama-server hosts one model per process, so the chat model and the embedding model
-run on separate ports. Both commands download the GGUF weights on first run (~2.5 GB
-combined) and cache them under `~/.cache/huggingface/hub`, so later starts are
-instant. The server does not begin serving until its download finishes.
-
-```bash
-# Terminal 1 — chat/extraction model (~2 GB), backs PDF extraction + match confirmation
-llama-server -hf Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M --port 8080 -c 8192
-
-# Terminal 2 — embedding model (~600 MB), backs the Stage 2 shortlist
-llama-server -hf Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0 --port 8081 --embeddings
-```
-
-`-c 8192` sets the context window — raise it if a long statement gets truncated
-during extraction.
-
-#### If the `-hf` download stalls
-
-`-hf` fetches the weights over a single connection that can go dead while still
-appearing ESTABLISHED — the log sits at the CORS banner and the blob under
-`~/.cache/huggingface/hub` stops growing, with no error and no timeout. Confirm by
-checking whether the partial file is still growing:
-
-```bash
-find ~/.cache/huggingface -name '*.downloadInProgress' -exec ls -l {} \;
-```
-
-If it's stalled, fetch the weights directly with a resumable download instead (the
-`models/` directory is gitignored), then point llama-server at the local files:
+~2.5 GB combined, into a gitignored `models/` directory.
 
 ```bash
 mkdir -p models && cd models
@@ -78,57 +57,123 @@ curl -L -C - --retry 10 --retry-all-errors \
   -O https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf
 curl -L -C - --retry 10 --retry-all-errors \
   -O https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf
+cd ..
 ```
+
+`-C -` resumes, so an interrupted download picks up rather than restarting.
+
+> **Do not use `llama-server -hf` to fetch the weights.** It downloads over a single
+> connection that can go dead while still appearing ESTABLISHED: the log sits at the
+> CORS banner, the blob under `~/.cache/huggingface/hub` stops growing, and there is
+> no error and no timeout. It cost about 40 minutes here before anyone noticed.
+
+### 4. Start the two model servers
+
+llama-server hosts one model per process, so the chat and embedding models run on
+separate ports.
 
 ```bash
-llama-server -m models/qwen2.5-3b-instruct-q4_k_m.gguf --port 8080 -c 8192
-llama-server -m models/Qwen3-Embedding-0.6B-Q8_0.gguf --port 8081 --embeddings
+llama-server -m models/qwen2.5-3b-instruct-q4_k_m.gguf --port 8080 -c 8192 &
+llama-server -m models/Qwen3-Embedding-0.6B-Q8_0.gguf --port 8081 --embeddings &
 ```
 
-`curl -C -` resumes where it left off, so a re-run after an interruption picks up
-rather than starting over.
+`-c 8192` sets the context window — raise it if a long statement gets truncated.
+Neither server binds its health endpoint until its weights finish loading, so
+"connection refused" during startup is normal.
 
-### 4. Run the app
+### 5. Run the app
 
 ```bash
-source .venv/bin/activate
-uvicorn app.main:app --reload
+source .venv/bin/activate && uvicorn app.main:app --port 8000
 ```
 
-Open http://127.0.0.1:8000 and drag in a bank statement + ledger.
+Open http://localhost:8000, drop in a bank statement and a ledger, and the results
+appear in the browser with the workbook available to download.
+
+Generate a test pair first if you have nothing to hand:
+
+```bash
+python scripts/make_sample_data.py     # writes sample_data/
+```
+
+## Reading the result
+
+Nine tabs, organised by what a reviewer must *do* rather than by which stage produced
+a row:
+
+| Tab | Purpose |
+| --- | --- |
+| **Summary** | The balancing proof. `UNEXPLAINED` must be `0.00` — anything else means a row was mismatched, double-counted or dropped. |
+| Matched | Every pairing, with its date gap, amount gap and corroboration |
+| Review - Amount | The two sides disagree about the money |
+| Review - Date | Booked on different dates |
+| Review - Weak Evidence | Nothing but the figures ties the pair together |
+| Unmatched - Bank | On the statement, not in the books — each row explained |
+| Unmatched - Ledger | In the books, not on the statement — the opposite meaning |
+| AI Matched | Model-asserted pairs, kept separate as the least certain |
+| Anomalies | Risk flags, which may also appear above: Stage 3 sees everything |
+
+Every match carries a **corroboration** label — `reference` (a shared cheque/UTR),
+`description` (payees correspond), or `amount_and_date_only`. The last is where two
+unrelated payments of the same size on the same day would be paired, so those are the
+rows worth a second look. They are labelled rather than withheld: measured on real
+data, no similarity threshold separates the wrong ones from the right ones.
+
+## How correctness is checked
+
+The engine does not ask to be trusted. `scripts/verify_reconciliation.py` proves a
+reconciliation using arithmetic the source documents must satisfy:
+
+```bash
+python scripts/verify_reconciliation.py <bank.pdf> <ledger.pdf>
+```
+
+1. **Self-consistency** — the printed figures agree with the file's own running
+   balance. A failure here is the *document's* problem, not the engine's.
+2. **Completeness** — every transaction appears exactly once. Nothing invented,
+   nothing dropped.
+3. **The reconciliation identity** — every rupee of difference is attributable to a
+   named item. This is the check an accountant applies to a BRS.
+4. **Matched-pair sanity.**
+
+Ingestion has two independent guards of its own. Each amount is checked against its
+own running-balance movement, which catches an OCR slip or a misread column; and the
+whole file is footed against its printed totals, which catches a *dropped row* — the
+per-row check compares consecutive rows, so a missing one leaves its neighbours
+looking perfectly consistent. Where the readings disagree irreconcilably, extraction
+refuses rather than publishing figures nothing downstream could tell were fiction.
 
 ## How the local model is used
 
-Every model call uses llama.cpp's **grammar-constrained decoding** (`response_format:
-json_schema`), which compiles the expected JSON schema into a GBNF grammar and
-restricts sampling to tokens that keep the output valid. This matters far more for a
-3B model than for a frontier API model — small models are the ones that drift into
+Every model call uses llama.cpp's **grammar-constrained decoding**
+(`response_format: json_schema`), which compiles the expected schema into a GBNF
+grammar and restricts sampling to tokens that keep the output valid. This matters far
+more for a 3B model than a frontier one — small models are the ones that drift into
 prose or unclosed braces when merely *asked* for JSON.
 
-**PDF extraction reads the text layer, not pixels.** A text-only 3B model has no
-vision capability, so `LocalPDFExtractor` pulls embedded text out of the PDF with
-pypdf and prompts the model with it, using the same unchanged per-bank templates. This
-fits the v1 scope, which covers text-based PDFs and excludes scanned/image statements;
-a scanned page yields no text layer and raises a clear error rather than silently
-returning nothing.
+**PDF tables are read geometrically, not by the model.** In layout-extracted text the
+money columns are right-aligned under their headings, so which column a number
+belongs to is a hard geometric fact. `layout_table.py` reads that in code — exactly,
+instantly and for free. The model is a fallback for layouts this cannot parse, and on
+real statements it has not been needed.
 
-**Degradation is graceful.** If a model server is unreachable or a call fails, the
-affected rows fall through to the CA's "unmatched" review queue and the report still
-builds — Stage 1's deterministic matches are never lost to a Stage 2 failure. You can
-run the app with no llama.cpp server at all and still get deterministic reconciliation.
+**Degradation is graceful.** If a model server is unreachable, affected rows fall
+through to the review queue and the report still builds. The app runs with no
+llama.cpp server at all — Stages 0, 1, 1.5 and 3 are entirely deterministic.
 
 ### Accuracy tradeoff
 
-A 3B model is a weaker judge than a frontier model, so its Stage 2 confidence scores
-are less reliable. That's contained by design: Stage 1 resolves the majority of rows
-deterministically without any model, Stage 2 only ever sees the leftovers, and
-anything below the confidence threshold goes to the CA queue rather than being
-asserted as a match. Raise `confidence_threshold` in `match_with_ai()` to be stricter.
+A 3B model is a weaker judge than a frontier one. That is contained by design: it
+sees only what Stages 1 and 1.5 could not resolve, guards reject implausible pairs
+before it is asked, and anything below the confidence threshold goes to the review
+queue rather than being asserted. `scripts/eval_confirmer.py` measures it against a
+labelled set — **run it after any change to the confirmer prompt, model or
+threshold.** A plausible-looking prompt edit once swung it from 0 to 4 false
+positives.
 
 ## Configuration
 
-No `.env` file is needed for the default local setup. To override a default, copy
-`.env.example` to `.env`:
+No `.env` is needed for the default local setup. To override, copy `.env.example`:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -138,8 +183,8 @@ No `.env` file is needed for the default local setup. To override a default, cop
 
 ### Using a hosted model instead
 
-Each AI step sits behind a `Protocol`, so swapping providers means changing what the
-dependency provider in `app/main.py` returns — nothing else in the pipeline changes:
+Each model step sits behind a `Protocol`, so swapping providers means changing what
+the dependency provider in `app/main.py` returns — nothing else changes:
 
 | Step | Local (default) | Hosted alternatives |
 | --- | --- | --- |
@@ -147,23 +192,48 @@ dependency provider in `app/main.py` returns — nothing else in the pipeline ch
 | Embeddings | `LocalEmbeddingClient` | `GeminiEmbeddingClient`, `VoyageEmbeddingClient` |
 | Match confirmation | `LocalMatchConfirmer` | `GeminiMatchConfirmer`, `ClaudeMatchConfirmer` |
 
-The hosted vision extractors are genuinely better at PDFs than the local text-layer
-path, so they're worth reaching for if you need scanned-statement support. Set the
-matching API key in `.env` (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`).
+A hosted *vision* extractor is the one genuine capability gain — it would allow
+scanned statements, which the local text-layer path cannot read. Set the matching API
+key in `.env`.
 
 ## Tests
 
 ```bash
-source .venv/bin/activate
-python -m pytest
+source .venv/bin/activate && python -m pytest
 ```
 
-The suite is fully offline — model clients are exercised against an in-memory HTTP
-transport, so no llama.cpp server or API key is required to run it.
+166 tests, fully offline — model clients run against an in-memory HTTP transport, so
+no llama.cpp server or API key is needed.
+
+Each test's docstring names the bug it exists for. Several encode failures found on
+real statements; read the docstring before changing a test.
 
 ## Adding a bank template
 
 Per the spec, PDF extraction is built and validated one bank at a time rather than as
-a generic parser. To add one: create a class in `app/ingestion/bank_templates/`
-implementing `build_prompt()` and `parse_response()` (copy `hdfc.py`), then register
-it in `_BANK_TEMPLATES` in `app/main.py`. It appears in the UI dropdown automatically.
+a generic parser. Copy `app/ingestion/bank_templates/hdfc.py`; a template declares:
+
+- `template_name`
+- `debit_is_inflow` — **False** for a bank statement (a Deposit is money in). Getting
+  this backwards inverts every amount and fails silently.
+- `build_prompt()` — used only when the deterministic parser cannot read the table
+- `extra_references()` / `counterparty()` — optional, for banks that bury the real
+  transaction id in the narration. HDFC does: parsing them lifted reference-backed
+  matches from 5 to 14 of 16.
+
+Register it in `_BANK_TEMPLATES` in `app/main.py` and it appears in the UI.
+
+Fix in this order of preference: the deterministic parser
+(`app/ingestion/layout_table.py`) → the template → the model, last resort.
+
+## Handling real client statements
+
+Put them in `private/`, which is gitignored. They are client financial data even when
+redacted.
+
+If a test fixture is derived from a real file, replace the account holder, account
+number, customer id, IFSC, transaction ids and counterparty names with invented
+equivalents **of the same character length** — the column-alignment tests depend on
+exact positions. If real identifiers ever reach a commit they must be purged from
+history with `git filter-repo --replace-text` before any push; scrubbing the working
+tree alone leaves them in history.

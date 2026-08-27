@@ -1,158 +1,125 @@
-# Workflow — testing against a real bank statement
+# Workflow — what to do next
 
 The plan. `PROGRESS.md` holds the current state.
 
-**Next session:** a real (redacted) HDFC statement and the matching client ledger
-arrive. That is the one thing that will tell us whether any of this generalizes —
-everything so far is synthetic plus two sample PDFs, and both of those turned out to
-contradict themselves.
+A real HDFC statement and its client ledger now reconcile correctly, and the four
+bugs that first contact exposed are fixed and regression-tested. Two gaps remain
+before HDFC can be called finished, and both need a document we do not yet have.
 
 ---
 
-## Before touching the real file
+## Priority 1 — A multi-page statement
 
-```bash
-cd ~/v-01
-source .venv/bin/activate && python -m pytest -q      # expect 165 passed
-llama-server -m models/qwen2.5-3b-instruct-q4_k_m.gguf --port 8080 -c 8192 &
-llama-server -m models/Qwen3-Embedding-0.6B-Q8_0.gguf --port 8081 --embeddings &
-python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \
-                                        sample_data/internal_ledger.pdf
-```
+The only real statement tested was single-page. Page furniture is handled and
+unit-tested (`test_layout_table.py`), but never against a genuine multi-page file.
 
-The fixture must still pass all four checks. If it doesn't, fix that first — a
-known-good baseline is what makes the real file's failures interpretable.
-
-**Handle the real file carefully.** It is client financial data even when redacted:
-keep it out of git (add its directory to `.gitignore` before copying it in), and do
-not paste its contents anywhere. Everything runs locally, so nothing leaves the
-machine on its own — keep it that way.
-
-## Step 1 — Look at the text layer before running anything
-
-Do not start with `/reconcile`. Start by seeing what the extractor sees:
+Expect: repeated column headers, page numbers, "continued" markers, and possibly a
+per-page subtotal block. The parser skips furniture it recognises; a real file will
+have shapes the synthetic one does not.
 
 ```bash
 python -c "
 from pypdf import PdfReader
-t=''.join(p.extract_text(extraction_mode='layout') or '' for p in PdfReader('REAL.pdf').pages)
-for i,l in enumerate([x.rstrip() for x in t.split(chr(10))][:40]): print(f'{i:3d}|{l}')
-"
+t=''.join(p.extract_text(extraction_mode='layout') or '' for p in PdfReader('private/REAL.pdf').pages)
+lines=[x.rstrip() for x in t.split(chr(10))]
+print(f'{len(lines)} lines')
+for i,l in enumerate(lines):
+    if l.strip(): print(f'{i:3d}|{l}')
+" | less
 ```
 
-What to look for, and what each means:
+Read the page boundaries specifically. Then extract and confirm the row count
+matches the statement's own, and that it **foots** — the foot check is what catches
+a page's worth of rows being silently dropped.
 
-| Observation | Implication |
-| --- | --- |
-| Empty / no text | Scanned PDF. Out of scope — needs OCR or a hosted vision model. Stop here. |
-| Columns visibly aligned | Good. The deterministic table parser should handle it. |
-| Columns collapsed into one stream | Layout mode failed. The model fallback will run and will probably be unreliable. |
-| Header repeated mid-document | Page breaks — check the parser doesn't emit header rows as transactions. |
-| Multi-line narrations | Check they attach to the row above rather than becoming phantom rows. |
-| No running-balance column | **Significant.** The balance audit cannot run, so the strongest safety net is gone and amounts rest on column position alone. |
+## Priority 2 — A statement spanning a month boundary
 
-## Step 2 — Extract, and check the rows against the printed page
+We ignore the `Value Dt` column entirely and match on transaction date. That was
+correct for the file tested, but a cheque issued 30-Jun and cleared 02-Jul appears
+in the June ledger and the July statement. Matching on transaction date alone would
+miss it, and it would surface as an unmatched row on each side — a false discrepancy
+that looks exactly like a real one.
+
+Two real cheques on the tested statement carried a value-date lag (`txn 05/07, value
+07/07`), so the column is populated and available; nothing consumes it yet.
+
+Decide, with a real month-boundary file in hand, whether Stage 1 should consider
+value date as an alternative when transaction date fails.
+
+## Priority 3 — More bank templates
+
+Four of the five target banks have none. Use `/add-bank-template`, which encodes the
+process: read the text layer before writing code, prefer the deterministic parser
+over the template and the template over the model, and lock every quirk into a test.
+
+Add one at a time, validated against a real statement each, per the spec.
+
+---
+
+## Running a real statement
+
+Use `/test-real-statement`. In short:
 
 ```bash
-python -c "
-from app.ingestion.pdf_parser import parse_pdf
-from app.ingestion.bank_templates.hdfc import HDFCBankTemplate
-from app.ingestion.vision_client import LocalPDFExtractor
-for t in parse_pdf('REAL.pdf', source='bank', template=HDFCBankTemplate(), extractor=LocalPDFExtractor()):
-    print(f'{t.date} {t.amount:>14} {str(t.reference or \"\"):14s} {t.description[:50]}')
-"
+cp ~/Downloads/<file>.pdf ~/v-01/private/
+git check-ignore -q private/<file>.pdf && echo IGNORED || echo "STOP"
+python scripts/verify_reconciliation.py private/<bank>.pdf private/<ledger>.pdf
 ```
 
-Read the terminal output as carefully as the rows:
+Read the terminal as carefully as the output — several bugs looked fine in the
+workbook and were only visible in the logs:
 
-- `Parsed N rows from the PDF table layout, without the model` — the deterministic
-  path handled it. Best case.
-- `Corrected N amount(s) ... against the running balance` — the audit caught
-  misreads. Worth reading each one: a few is normal, many means the column geometry
-  is being misread and the template needs work.
-- `prints no opening balance, so the first row ... rests on its column position` —
-  check row 1 by hand.
-- `PDFExtractionError` — extraction refused rather than publishing wrong figures.
-  The message names the offending row; compare it against the statement.
+- `Parsed N rows ... without the model` — the deterministic path handled it
+- `foots: N rows total X` — the file agrees with its own printed totals
+- `Corrected N amount(s) ... against the running balance` — a few is normal; many
+  means the column geometry is being misread
+- `does not foot` — a row was dropped or double-counted
+- `prints no opening balance` — row 1 rests on column position alone; check it
+- `PDFExtractionError` — extraction refused rather than publish wrong figures
 
-Then **spot-check against the actual PDF**: first row, last row, the largest amount,
-any row with an unusual layout. Confirm the count matches the statement's own
-transaction count.
+## Reading the result
 
-## Step 3 — Reconcile, then verify arithmetically
+Nine workbook tabs, mirrored by the browser dashboard:
 
-```bash
-python scripts/verify_reconciliation.py REAL_BANK.pdf REAL_LEDGER.pdf
-```
+- **Summary** — the balancing proof. `UNEXPLAINED` must be `0.00`; anything else
+  means a row was mismatched, double-counted or dropped.
+- **Matched** — every pairing, with its date gap, amount gap and corroboration
+- **Review - Amount / Date / Weak Evidence** — the pairings a person should look at.
+  `amount_and_date_only` is where two unrelated same-size same-day payments would be
+  paired.
+- **Unmatched - Bank / Ledger** — opposite meanings on a reconciliation, each row
+  explained. On a real file these should be recognisable: uncleared cheques,
+  un-booked charges, deposits in transit.
+- **Anomalies** — if it floods, calibrate `AnomalyConfig` for this client rather
+  than assuming the rule is wrong.
 
-This is the objective test — it doesn't require trusting the engine:
-
-1. **Self-consistency** — do the printed figures agree with the file's own running
-   balance? Failure here is the *document's* problem, not the engine's.
-2. **Completeness** — every transaction accounted for exactly once.
-3. **Reconciliation identity** — is every rupee of difference attributable to a named
-   item? This is the check a CA applies to a BRS.
-4. **Matched-pair sanity.**
-
-Failures in 2–4 point at the engine. A failure in 1 points at the file.
-
-## Step 4 — Read the report like a reviewer
-
-Open the workbook and go to the **Matched** tab's `corroboration` column first:
-
-- `reference` — strongest, a shared cheque/UTR/voucher number.
-- `description` — payees correspond.
-- `amount_and_date_only` — **review these**. Nothing but the figures links them, so
-  this is where two unrelated same-size same-day payments would be paired.
-
-Then check **Unmatched** — on a real reconciliation these should be explainable
-(uncleared cheques, bank charges not yet booked, timing differences). If genuine
-matches are sitting there, that is a recall problem worth diagnosing.
-
-Then **Anomalies** — if it floods, the thresholds need calibrating for this client
-rather than the rule being wrong. `AnomalyConfig` holds them.
-
-## Step 5 — Expect the HDFC template to need work, and fix it narrowly
-
-Real statements have layouts synthetic ones don't: page headers repeating,
-continuation markers, "B/F" and "C/F" lines, multi-currency columns, footers between
-transaction blocks.
-
-Fix in this order of preference:
-
-1. **The deterministic parser** (`app/ingestion/layout_table.py`) — column detection,
-   row filtering, continuation handling. Best returns, no model involved.
-2. **The HDFC template** (`app/ingestion/bank_templates/hdfc.py`) — only affects the
-   model fallback path.
-3. **Only then** consider the model.
-
-Add a regression test for each real-world quirk found, using the actual text layout
-(anonymized) as the fixture. That is how the template stops regressing.
-
-## Then — the standing gap list
+## The standing gap list
 
 Roughly in order of value:
 
-- **More bank templates.** Four of the five target banks are missing. Add one at a
-  time, validated against a real statement each, per the spec.
-- **Scanned PDF support.** Needs OCR or a hosted vision extractor. Currently refused
-  with a clear error, which is a defensible v1 position.
-- **Wire `AnomalyConfig` to the API** so thresholds can be set per client.
-- **Stage 3's AI layer** — specced, never built. Rules only today. Keep it strictly
+- **Wire `AnomalyConfig` to the API** so thresholds can be set per client
+- **Scanned PDF support** — needs OCR or a hosted vision extractor. Currently
+  refused with a clear error, a defensible v1 position.
+- **Stage 3's AI layer** — specced, never built. Rules only. Keep it strictly
   separate from Stage 2 matching, per the spec's explicit design rule.
-- **Auth, rate limiting, upload size caps** — before this is exposed to anyone else.
-- **Convention auto-detection for CSV/Excel ledgers** (PDF only today).
-- **Re-run `scripts/eval_confirmer.py` with real pairs** once there are known-answer
-  matches from actual statements. The current 15 cases are my own constructions.
+- **Auth, rate limiting, upload size caps** — before this is exposed to anyone else
+- **Convention auto-detection for CSV/Excel ledgers** (PDF only today)
+- **Re-run `scripts/eval_confirmer.py` with real pairs** once known-answer matches
+  from actual statements exist. The current 15 cases are constructions.
+- **Reconsider whether Stage 2 earns its place** — it has contributed nothing on any
+  dataset since Stage 1.5 landed. Keeping it costs nothing when it does not fire,
+  but do not mistake it for a working stage.
 
 ## Rules of engagement, learned the hard way
 
-- **Deterministic beats model, every time.** Each thing moved out of the model made
+- **Deterministic beats model, every time.** Everything moved out of the model made
   the system better. Reach for code first.
 - **Measure thresholds; never guess.** Pick the middle of a plateau, and record the
   measurement in a comment next to the value.
 - **Fail loudly.** A wrong number in a financial report is worse than no report.
 - **Re-run `scripts/eval_confirmer.py` after any confirmer prompt change.** It has
   swung from 0 to 4 false positives on a plausible-looking edit.
-- **Verify against the source document, not the Excel output.** Several bugs looked
-  fine in the report and were only visible in the terminal or the PDF.
+- **Verify against the source document, not the generated output.** Several bugs
+  looked fine in the workbook and were visible only in the terminal or the PDF.
+- **A test's docstring says which bug it exists for.** Read it before changing the
+  test — several encode failures found on real statements.

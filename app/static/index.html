@@ -32,24 +32,24 @@
     --bg: #f6f7f9;
     --surface: #ffffff;
     --border: #dde1e6;
-    --border-hover: #2f6f5e;
+    --border-hover: #85bb65;
     --text: #1b1f23;
     --text-muted: #5b6470;
-    --accent: #2f6f5e;
-    --accent-dark: #1c4a3d;
-    --accent-tint: #eaf3f0;
-    --deep: #14322a;
-    --deep-line: #2a4d43;
+    --accent: #85bb65;
+    --accent-dark: #4a7132;
+    --accent-tint: #eef7e9;
+    --deep: #223715;
+    --deep-line: #3f5d2d;
     --on-deep: #f4f7f5;
-    --on-deep-muted: #9fb8ae;
+    --on-deep-muted: #aabc9f;
     --error-bg: #fdecec;
     --error-text: #9c2b2b;
     --error-border: #e4a9a9;
     --warning-bg: #fdf3e2;
     --warning-text: #8a5a12;
     --warning-border: #e3b673;
-    --success-bg: #eaf7ef;
-    --success-text: #1e6b3c;
+    --success-bg: #f1f8ed;
+    --success-text: #456a2f;
   }
 
   * { box-sizing: border-box; }
@@ -506,8 +506,8 @@
       </div>
       <div class="unexplained-cell">
         <svg width="34" height="34" viewBox="0 0 24 24" fill="none" style="flex-shrink: 0;" id="unexplained-icon">
-          <circle cx="12" cy="12" r="10" stroke="#7fcf9f" stroke-width="1.8"/>
-          <path d="M8 12.5l2.5 2.5L16 9.5" stroke="#7fcf9f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="12" cy="12" r="10" stroke="#9ecf81" stroke-width="1.8"/>
+          <path d="M8 12.5l2.5 2.5L16 9.5" stroke="#9ecf81" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <div>
           <div class="proof-label">Unexplained</div>
@@ -836,8 +836,8 @@
     const iconEl = document.getElementById("unexplained-icon");
     const isBalanced = Math.abs(data.summary.unexplained) < 0.005;
     unexplainedEl.textContent = fmtAmount(data.summary.unexplained);
-    unexplainedEl.style.color = isBalanced ? "#eafff3" : "#ffb4a8";
-    iconEl.querySelectorAll("circle, path").forEach((el) => el.setAttribute("stroke", isBalanced ? "#7fcf9f" : "#ff8a75"));
+    unexplainedEl.style.color = isBalanced ? "#f3faef" : "#ffb4a8";
+    iconEl.querySelectorAll("circle, path").forEach((el) => el.setAttribute("stroke", isBalanced ? "#9ecf81" : "#ff8a75"));
 
     document.getElementById("badge-matched").textContent = data.matched.length;
     document.getElementById("badge-review").textContent = reviewPairs(data.matched).length;

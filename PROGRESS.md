@@ -61,7 +61,7 @@ the value.
 
 ## Verified working
 
-- **181 tests**, fully offline (model clients use `httpx.MockTransport`).
+- **188 tests**, fully offline (model clients use `httpx.MockTransport`).
 - **Real HDFC statement + client ledger** reconcile correctly: 15 matched by Stage 1,
   1 by Stage 1.5 (a deliberate ₹500 typo), 0 needed the model, and the 3 remaining
   rows are genuine reconciling items — two un-booked bank charges and a deposit in
@@ -77,6 +77,12 @@ the value.
   dashboard cite a source line, across both documents. Rows the model read report
   "no source line" rather than inventing one. Surfaced in the browser behind "Show
   source" and as four columns per pair in the workbook.
+- **Click-to-cell citation on PDFs** — every PDF row also carries a box on the page
+  and a box per cell, and the dashboard shows the row highlighted on the rendered
+  page with the triggering figure outlined. Verified by cropping the PDF back to each
+  stored box and re-reading it: **35/35 row boxes and 129/129 cell boxes** returned
+  their own value on the real pair. Boxes are page fractions, not points, so they
+  survive any render resolution.
 - **Browser dashboard** at `/` backed by `/reconcile/preview`, which returns the
   result as JSON with the workbook embedded as base64 — so downloading cannot re-run
   the pipeline or produce a workbook that differs from the screen.
@@ -211,7 +217,7 @@ cd ~/v-01
 pgrep -fl llama-server                     # both model servers up?
 curl -s localhost:8080/health              # chat  (binds only after weights load)
 curl -s localhost:8081/health              # embeddings
-source .venv/bin/activate && python -m pytest -q          # expect 181 passed
+source .venv/bin/activate && python -m pytest -q          # expect 188 passed
 python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \
                                         sample_data/internal_ledger.pdf
 git log --oneline | head -5

@@ -14,6 +14,22 @@ from pydantic import BaseModel, Field, computed_field
 NO_NARRATION = "(no narration)"
 
 
+class Box(BaseModel):
+    """A rectangle on a page, as fractions of the page's width and height.
+
+    Normalized rather than stored in points so a box can be overlaid on a rendering
+    at any resolution. Points would tie every stored box to the DPI it was measured
+    at and put the highlight in the wrong place the moment the page is rendered at
+    another. Origin is top-left, matching how the page is rendered and how a browser
+    positions an overlay.
+    """
+
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
 class SourceRef(BaseModel):
     """Where in the uploaded file this transaction was read from.
 
@@ -41,6 +57,15 @@ class SourceRef(BaseModel):
     line_start: Optional[int] = None
     line_end: Optional[int] = None
     text: str = ""
+    # Where the row is printed on the page, so a rendering can highlight it. Set only
+    # for `pdf_line` rows whose geometry could be read; a missing box costs the
+    # reviewer a visual convenience, never the citation itself.
+    box: Optional[Box] = None
+    # Per-cell boxes keyed by field (date, reference, debit, credit, balance,
+    # description) — what makes "click through to the exact cell" exact.
+    cell_boxes: dict[str, Box] = Field(default_factory=dict)
+    # Page size in PDF points, for callers that need the aspect ratio.
+    page_size: Optional[tuple[float, float]] = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

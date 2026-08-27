@@ -37,6 +37,7 @@ from app.ingestion.ledger_templates.generic_ledger import (
     GenericLedgerTemplate,
 )
 from app.ingestion.pdf_parser import PDFExtractionError, parse_pdf
+from app.ingestion.pdf_render import render_pages
 from app.ingestion.vision_client import LocalPDFExtractor, VisionExtractor
 from app.matching.matcher import match
 from app.matching.models import MatchResult
@@ -401,7 +402,7 @@ async def _run_reconciliation(
     embedding_client: EmbeddingClient,
     confirmer: MatchConfirmer,
     anomaly_config: AnomalyConfig | None = None,
-) -> tuple[MatchResult, AIMatchResult, AnomalyResult, bytes]:
+) -> tuple[MatchResult, AIMatchResult, AnomalyResult, bytes, dict[str, bytes]]:
     """Full pipeline, end to end: ingest both files (Stage 0), deterministic match
     (Stage 1), AI matching net on whatever Stage 1 couldn't resolve (Stage 2),
     anomaly detection across the full reconciled set (Stage 3), then build the
@@ -439,7 +440,11 @@ async def _run_reconciliation(
     anomaly_result = detect_anomalies(match_result, config=anomaly_config)
     report_bytes = build_report(match_result, ai_result, anomaly_result)
 
-    return match_result, ai_result, anomaly_result, report_bytes
+    uploads = {
+        bank_file.filename or "": bank_bytes,
+        ledger_file.filename or "": ledger_bytes,
+    }
+    return match_result, ai_result, anomaly_result, report_bytes, uploads
 
 
 @app.post("/reconcile")
@@ -454,7 +459,7 @@ async def reconcile(
     confirmer: MatchConfirmer = Depends(get_match_confirmer),
 ) -> StreamingResponse:
     """Run the pipeline and return the audit-ready report as a downloadable .xlsx."""
-    _, _, _, report_bytes = await _run_reconciliation(
+    _, _, _, report_bytes, _ = await _run_reconciliation(
         bank_file=bank_file,
         ledger_file=ledger_file,
         bank_pdf_template=bank_pdf_template,
@@ -470,6 +475,32 @@ async def reconcile(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=reconciliation_report.xlsx"},
     )
+
+
+def _cited_page_images(
+    uploads: dict[str, bytes], transactions: list[Transaction]
+) -> dict[str, dict[str, str]]:
+    """Render only the pages a citation actually points at, per file.
+
+    Keyed by file name so the dashboard can show the right document for either side
+    of a pair. Pages nothing was flagged on are never rendered: a reviewer will not
+    open them, and they would cost the response for nothing.
+    """
+    cited: dict[str, set[int]] = {}
+    for txn in transactions:
+        ref = txn.source_ref
+        if ref and ref.kind == "pdf_line" and ref.page:
+            cited.setdefault(txn.file_name, set()).add(ref.page)
+
+    images: dict[str, dict[str, str]] = {}
+    for name, pages in cited.items():
+        data = uploads.get(name)
+        if not data:
+            continue
+        rendered = render_pages(data, pages)
+        if rendered:
+            images[name] = {str(page): url for page, url in rendered.items()}
+    return images
 
 
 def _txn_summary(txn: Transaction) -> dict:
@@ -502,7 +533,7 @@ async def reconcile_preview(
     dashboard, with the .xlsx workbook embedded as base64 so a subsequent download
     doesn't have to run the pipeline (and any live model calls) a second time.
     """
-    match_result, ai_result, anomaly_result, report_bytes = await _run_reconciliation(
+    match_result, ai_result, anomaly_result, report_bytes, uploads = await _run_reconciliation(
         bank_file=bank_file,
         ledger_file=ledger_file,
         bank_pdf_template=bank_pdf_template,
@@ -574,6 +605,10 @@ async def reconcile_preview(
             }
             for flag in anomaly_result.flags
         ],
+        # Tier 3 of source grounding: the cited pages themselves, so a reviewer can
+        # be shown the row highlighted on the document rather than told where it is.
+        # Keyed by file name, then page number.
+        "page_images": _cited_page_images(uploads, bank_txns_all + ledger_txns_all),
         "report_base64": base64.b64encode(report_bytes).decode("ascii"),
     }
 

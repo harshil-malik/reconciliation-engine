@@ -425,6 +425,23 @@
     border: 1px solid var(--border); border-radius: 4px; padding: 7px 9px; margin: 0;
   }
   .source-missing { font-size: 12px; color: var(--text-muted); font-style: italic; }
+
+  /* The cited page, clipped to a band around the row. The clip's aspect ratio and
+     the image's negative margin are both expressed as percentages of the container
+     WIDTH, so the crop stays correct at any rendered size — a percentage margin
+     resolves against width, which is what makes this work without JavaScript. */
+  .page-clip {
+    position: relative; overflow: hidden; margin-top: 8px;
+    border: 1px solid var(--border); border-radius: 4px; background: #fff;
+  }
+  .page-inner { position: relative; }
+  .page-inner img { display: block; width: 100%; }
+  .hl { position: absolute; pointer-events: none; }
+  /* The row, softly; the cell, sharply. A reviewer needs to see the figure in the
+     context of its row, not the figure alone. */
+  .hl-row { background: rgba(255, 214, 0, 0.28); outline: 1px solid rgba(180, 140, 0, 0.5); }
+  .hl-cell { background: rgba(255, 92, 0, 0.30); outline: 2px solid rgba(220, 70, 0, 0.95); border-radius: 2px; }
+  .page-caption { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
   .source-rule {
     font-size: 11px; color: var(--text-muted); margin-bottom: 8px;
   }
@@ -734,6 +751,49 @@
 
   // ---------- source grounding ----------
 
+  // Vertical padding around the cited row, as a fraction of the page height, so the
+  // row is shown with its neighbours rather than floating alone and unplaceable.
+  const BAND_PAD = 0.018;
+
+  // The rendered pages arrive once with the result and are shared by every citation
+  // that points into the same document, rather than being carried per row — the same
+  // page backs many rows, and duplicating it per row would multiply the payload.
+  let RESULTS = {};
+
+  function pageImage(txn) {
+    const ref = txn.source_ref;
+    if (!ref || !ref.box || !ref.page) return "";
+    const byPage = (RESULTS.page_images || {})[txn.file_name];
+    const url = byPage && byPage[String(ref.page)];
+    if (!url) return "";
+
+    const [pw, ph] = ref.page_size || [595, 842];
+    const box = ref.box;
+    const top = Math.max(0, box.y0 - BAND_PAD);
+    const bottom = Math.min(1, box.y1 + BAND_PAD);
+    const band = Math.max(bottom - top, 0.012);
+
+    // Highlight the cell the reviewer is being pointed at, falling back to the
+    // amount, then whatever the row carries.
+    const cells = ref.cell_boxes || {};
+    const cell = cells.debit || cells.credit || cells.balance || cells.reference || null;
+
+    const pct = (v) => (v * 100).toFixed(3) + "%";
+    const hl = (b, cls) => b
+      ? `<div class="hl ${cls}" style="left:${pct(b.x0)};top:${pct(b.y0)};width:${pct(b.x1 - b.x0)};height:${pct(b.y1 - b.y0)};"></div>`
+      : "";
+
+    return `
+      <div class="page-clip" style="aspect-ratio: ${pw} / ${ph * band};">
+        <div class="page-inner" style="margin-top: -${(top * 100 * ph / pw).toFixed(3)}%;">
+          <img src="${url}" alt="Page ${ref.page} of ${escapeHtml(txn.file_name || "")}">
+          ${hl(box, "hl-row")}
+          ${hl(cell, "hl-cell")}
+        </div>
+      </div>
+      <div class="page-caption">${escapeHtml(txn.file_name || "")} — page ${ref.page}, as uploaded</div>`;
+  }
+
   // One side's provenance: which file, where in it, and the line itself verbatim.
   // Printed rather than paraphrased — the point is that the reviewer reads what the
   // engine read, and can check it against the document they uploaded.
@@ -752,7 +812,8 @@
       : `<div class="source-missing">${escapeHtml(ref.label)}</div>`;
     return `<div class="source-block">
       <div class="source-head">${label} · ${file} · <span class="source-loc">${escapeHtml(ref.label)}</span></div>
-      ${ref.text ? body : body}
+      ${body}
+      ${pageImage(txn)}
     </div>`;
   }
 
@@ -911,6 +972,7 @@
 
   function renderResults(data) {
     state.result = data;
+    RESULTS = data;
 
     document.getElementById("results-filenames").textContent =
       `${state.bank.name} → ${state.ledger.name}`;

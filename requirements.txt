@@ -9,6 +9,13 @@ python-dotenv
 # pypdf pulls the text layer out of PDFs for the local text-only extractor.
 httpx
 pypdf
+# Source grounding. pdfplumber (MIT) gives exact per-word boxes, which is what turns
+# a line citation into a highlightable cell; pypdfium2 (BSD/Apache) renders the cited
+# page. Deliberately NOT PyMuPDF, which does both but is AGPL-3.0 — a poor licence to
+# build on for software distributed to clients. Both are optional at runtime: without
+# them a citation keeps its file, page and line, and only loses the picture.
+pdfplumber
+pypdfium2
 # Optional hosted-provider backends, kept installed so those code paths stay usable
 # if you swap a dependency in app/main.py away from the local llama.cpp default
 # (app/ingestion/vision_client.py, app/ai_matching/confirmer.py + embeddings.py).

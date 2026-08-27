@@ -11,6 +11,7 @@ import pandas as pd
 from app.ingestion.amounts import to_decimal
 from app.ingestion.bank_templates.base import BankPDFTemplate
 from app.ingestion.vision_client import VisionExtractor
+from app.ingestion.pdf_geometry import annotate_geometry
 from app.schema import SourceRef, Transaction
 
 logger = logging.getLogger(__name__)
@@ -301,5 +302,9 @@ def parse_pdf(
                 raw_row=raw_row,
             )
         )
+
+    # Tier 2 of source grounding: turn each line citation into a box on the page, so
+    # a reviewer can be shown the row and the cell rather than told where it is.
+    annotate_geometry(pdf_bytes, transactions)
 
     return transactions

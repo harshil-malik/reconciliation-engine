@@ -448,3 +448,48 @@ def test_source_citation_survives_into_the_workbook() -> None:
         assert f"{prefix}_source_text" in matched.columns
         assert matched[f"{prefix}_source"].str.startswith("row ").all()
         assert matched[f"{prefix}_source_text"].str.len().gt(0).all()
+
+
+def test_preview_renders_only_the_pages_a_citation_points_at(tmp_path) -> None:
+    """Tier 3: the cited page travels with the result so the dashboard can show the
+    row highlighted on the document. Pages arrive once per file and are shared by
+    every row citing them — carrying a page per row would multiply the payload."""
+    from scripts.make_sample_data import write_text_pdf
+
+    pdf = tmp_path / "ledger.pdf"
+    write_text_pdf(
+        [
+            "Date        Particulars                     Voucher No.    Debit          Credit         Balance",
+            "01/07/2026  Rajesh Kumar Traders INV2241     UPI2241        12,450.00                     87,550.00",
+        ],
+        pdf,
+    )
+    bank_csv = (
+        b"Date,Narration,Chq/Ref No,Withdrawal Amt,Deposit Amt\n"
+        b"01/07/26,UPI-RAJESH KUMAR TRADERS-INV2241,UPI2241,12450.00,\n"
+    )
+
+    response = client.post(
+        "/reconcile/preview",
+        files={
+            "bank_file": ("bank.csv", bank_csv, "text/csv"),
+            "ledger_file": ("ledger.pdf", pdf.read_bytes(), "application/pdf"),
+        },
+        data={"ledger_pdf_template": "generic_ledger"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    images = body["page_images"]
+    assert list(images) == ["ledger.pdf"], "only the PDF side has pages to render"
+    assert list(images["ledger.pdf"]) == ["1"]
+    assert images["ledger.pdf"]["1"].startswith("data:image/png;base64,")
+
+    # The PDF row carries geometry; the CSV row carries a citation but no box, and
+    # says so rather than implying one.
+    ledger_rows = [p["ledger"] for p in body["matched"]] + body["unmatched_ledger"]
+    assert any(r["source_ref"]["box"] for r in ledger_rows)
+    bank_rows = [p["bank"] for p in body["matched"]] + body["unmatched_bank"]
+    assert all(r["source_ref"]["box"] is None for r in bank_rows)
+    assert all(r["source_ref"]["kind"] == "sheet_row" for r in bank_rows)

@@ -158,6 +158,18 @@ model is asked instead, there is no line to point at, and the record says so rat
 than naming a plausible one. An invented citation is the exact failure this feature
 exists to prevent.
 
+For a PDF the citation goes further than a line number: each row carries a box on
+the page, and each cell within it its own box, so the dashboard shows the row
+highlighted on the document as uploaded, with the figure that triggered the flag
+outlined inside it. Boxes are stored as fractions of the page rather than points, so
+they stay correct at whatever size the page is rendered.
+
+Only pages a citation actually points at are rendered, once per file and shared by
+every row citing them, capped at 12 pages and encoded greyscale — a statement page
+costs about 190 KB rather than 437 KB, with nothing lost on black type. Both
+libraries are optional: without them a citation keeps its file, page and line and
+loses only the picture.
+
 One thing a citation deliberately does not hide: where the per-row balance audit
 corrected a misread figure, the cited line still shows what the statement *printed*,
 while the amount used is the corrected one. Both are on screen together — that
@@ -262,7 +274,7 @@ key in `.env`.
 source .venv/bin/activate && python -m pytest
 ```
 
-181 tests, fully offline — model clients run against an in-memory HTTP transport, so
+188 tests, fully offline — model clients run against an in-memory HTTP transport, so
 no llama.cpp server or API key is needed.
 
 Each test's docstring names the bug it exists for. Several encode failures found on

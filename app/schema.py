@@ -30,6 +30,21 @@ class Box(BaseModel):
     y1: float
 
 
+class SourceCell(BaseModel):
+    """One cell of a spreadsheet row, with the role the column mapper gave it.
+
+    A CSV or Excel row has no page to draw a box on, so it is shown as the row it is:
+    the columns as the file names them, the values as printed, and the cell that
+    triggered the flag marked. `field` carries the canonical role — date, description,
+    reference, debit, credit, amount — so the reviewer's eye can be sent to the right
+    column without the browser having to re-guess a mapping ingestion already made.
+    """
+
+    column: str
+    value: str
+    field: Optional[str] = None
+
+
 class SourceRef(BaseModel):
     """Where in the uploaded file this transaction was read from.
 
@@ -66,6 +81,9 @@ class SourceRef(BaseModel):
     cell_boxes: dict[str, Box] = Field(default_factory=dict)
     # Page size in PDF points, for callers that need the aspect ratio.
     page_size: Optional[tuple[float, float]] = None
+    # The row's cells, for `sheet_row` citations — the spreadsheet equivalent of the
+    # per-cell boxes a PDF gets.
+    cells: list[SourceCell] = Field(default_factory=list)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -442,6 +442,26 @@
   .hl-row { background: rgba(255, 214, 0, 0.28); outline: 1px solid rgba(180, 140, 0, 0.5); }
   .hl-cell { background: rgba(255, 92, 0, 0.30); outline: 2px solid rgba(220, 70, 0, 0.95); border-radius: 2px; }
   .page-caption { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+  /* The spreadsheet equivalent of the page band: the row as the file holds it, with
+     the cell that triggered the flag marked. A CSV has no page to draw on, but the
+     reviewer still needs to be shown the row rather than told where it is. */
+  .sheet-wrap { margin-top: 8px; overflow-x: auto; border: 1px solid var(--border); border-radius: 4px; }
+  table.sheet-row { border-collapse: collapse; font-size: 11.5px; width: 100%; }
+  table.sheet-row th, table.sheet-row td {
+    padding: 5px 9px; text-align: left; white-space: nowrap;
+    border-right: 1px solid var(--border);
+  }
+  table.sheet-row th {
+    font-weight: 500; font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted); border-bottom: 1px solid var(--border);
+  }
+  table.sheet-row td { font-variant-numeric: tabular-nums; }
+  table.sheet-row th:last-child, table.sheet-row td:last-child { border-right: none; }
+  table.sheet-row .cell-hit {
+    background: rgba(255, 92, 0, 0.22); outline: 2px solid rgba(220, 70, 0, 0.9);
+    outline-offset: -2px; font-weight: 600;
+  }
   .source-rule {
     font-size: 11px; color: var(--text-muted); margin-bottom: 8px;
   }
@@ -760,6 +780,24 @@
   // page backs many rows, and duplicating it per row would multiply the payload.
   let RESULTS = {};
 
+  // The money column is what a reviewer is being pointed at: it is the figure that
+  // put the row in front of them. Falls back to whatever the row does carry.
+  function triggeringCell(cells) {
+    const money = cells.filter((c) => ["debit", "credit", "amount"].includes(c.field) && c.value);
+    if (money.length) return money[0];
+    return cells.find((c) => c.field === "reference" && c.value) || null;
+  }
+
+  function sheetRow(ref) {
+    const cells = ref.cells || [];
+    if (!cells.length) return "";
+    const hit = triggeringCell(cells);
+    return `<div class="sheet-wrap"><table class="sheet-row">
+      <thead><tr>${cells.map((c) => `<th>${escapeHtml(c.column)}</th>`).join("")}</tr></thead>
+      <tbody><tr>${cells.map((c) => `<td class="${c === hit ? "cell-hit" : ""}">${escapeHtml(c.value)}</td>`).join("")}</tr></tbody>
+    </table></div>`;
+  }
+
   function pageImage(txn) {
     const ref = txn.source_ref;
     if (!ref || !ref.box || !ref.page) return "";
@@ -807,9 +845,13 @@
     // A row the model read has no line to point at. Saying so is the honest answer;
     // inventing a plausible line number would be exactly the unsourced claim this
     // feature exists to remove.
-    const body = ref.text
-      ? `<pre class="source-text">${escapeHtml(ref.text)}</pre>`
-      : `<div class="source-missing">${escapeHtml(ref.label)}</div>`;
+    // A spreadsheet row reads far better as the row it is than as a run of
+    // "column: value" text, so the table replaces the raw line where we have cells.
+    const body = (ref.cells && ref.cells.length)
+      ? sheetRow(ref)
+      : ref.text
+        ? `<pre class="source-text">${escapeHtml(ref.text)}</pre>`
+        : `<div class="source-missing">${escapeHtml(ref.label)}</div>`;
     return `<div class="source-block">
       <div class="source-head">${label} · ${file} · <span class="source-loc">${escapeHtml(ref.label)}</span></div>
       ${body}

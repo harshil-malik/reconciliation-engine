@@ -493,3 +493,34 @@ def test_preview_renders_only_the_pages_a_citation_points_at(tmp_path) -> None:
     bank_rows = [p["bank"] for p in body["matched"]] + body["unmatched_bank"]
     assert all(r["source_ref"]["box"] is None for r in bank_rows)
     assert all(r["source_ref"]["kind"] == "sheet_row" for r in bank_rows)
+
+
+def test_spreadsheet_citation_carries_its_cells_and_their_roles() -> None:
+    """A CSV row has no page to draw a box on, so it is shown as the row it is. The
+    columns carry the role ingestion assigned them, so the dashboard can mark the
+    cell that triggered the flag instead of re-guessing a mapping already made."""
+    response = client.post(
+        "/reconcile/preview",
+        files={
+            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
+            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
+        },
+    )
+    assert response.status_code == 200
+
+    ledger = [p["ledger"] for p in response.json()["matched"]]
+    assert ledger
+    for row in ledger:
+        cells = row["source_ref"]["cells"]
+        # Every column of the file is present, in the file's own order.
+        assert [c["column"] for c in cells] == [
+            "Txn Date", "Particulars", "Voucher No", "Debit", "Credit"
+        ]
+        roles = {c["column"]: c["field"] for c in cells}
+        assert roles["Txn Date"] == "date"
+        assert roles["Particulars"] == "description"
+        assert roles["Voucher No"] == "reference"
+        assert roles["Debit"] == "debit" and roles["Credit"] == "credit"
+        # Exactly one money column carries a figure — that is the cell to mark.
+        money = [c for c in cells if c["field"] in ("debit", "credit") and c["value"]]
+        assert len(money) == 1

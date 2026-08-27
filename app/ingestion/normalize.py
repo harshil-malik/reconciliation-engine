@@ -6,7 +6,7 @@ import pandas as pd
 
 from app.ingestion.amounts import to_decimal
 from app.ingestion.column_mapping import detect_columns
-from app.schema import SourceRef, Transaction
+from app.schema import SourceCell, SourceRef, Transaction
 
 
 def _clean_cell(value: object) -> object:
@@ -44,6 +44,18 @@ def normalize_dataframe(
     detect it (`choose_ledger_convention`) rather than assume.
     """
     mapping = detect_columns(df)
+
+    # Which canonical role each source column was given, so a citation can point at
+    # the column that actually carries the money rather than making the reader guess.
+    roles: dict[object, str] = {}
+    for field in ("date", "description", "reference", "amount"):
+        if field in mapping:
+            roles[mapping[field]] = field
+    if "debit_credit" in mapping:
+        debit_column, credit_column = mapping["debit_credit"]
+        roles[debit_column] = "debit"
+        roles[credit_column] = "credit"
+
     transactions: list[Transaction] = []
 
     # Numbered the way the spreadsheet numbers them: the header occupies row 1, so
@@ -88,6 +100,14 @@ def normalize_dataframe(
                     text=" | ".join(
                         f"{k}: {v}" for k, v in raw_row.items() if v not in (None, "")
                     ),
+                    cells=[
+                        SourceCell(
+                            column=str(column),
+                            value="" if value is None else str(value),
+                            field=roles.get(column),
+                        )
+                        for column, value in raw_row.items()
+                    ],
                 ),
                 raw_row=raw_row,
             )

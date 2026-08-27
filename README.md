@@ -170,6 +170,11 @@ costs about 190 KB rather than 437 KB, with nothing lost on black type. Both
 libraries are optional: without them a citation keeps its file, page and line and
 loses only the picture.
 
+A CSV or Excel row has no page to draw on, so it is shown as the row it is: the
+columns as the file names them, the values as printed, and the cell that triggered
+the flag marked. Each column carries the role ingestion assigned it, so the mapping
+the reviewer is being shown is the one matching actually used.
+
 One thing a citation deliberately does not hide: where the per-row balance audit
 corrected a misread figure, the cited line still shows what the statement *printed*,
 while the amount used is the corrected one. Both are on screen together — that
@@ -274,7 +279,7 @@ key in `.env`.
 source .venv/bin/activate && python -m pytest
 ```
 
-188 tests, fully offline — model clients run against an in-memory HTTP transport, so
+189 tests, fully offline — model clients run against an in-memory HTTP transport, so
 no llama.cpp server or API key is needed.
 
 Each test's docstring names the bug it exists for. Several encode failures found on

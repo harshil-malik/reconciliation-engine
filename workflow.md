@@ -106,11 +106,6 @@ Roughly in order of value:
   reconcile routes take an `anomaly_config` JSON field and `GET /anomaly-config`
   returns the defaults to edit — but nothing stores it, so an engagement's thresholds
   have to be re-sent every run.
-- **Source grounding for CSV and Excel beyond the row number.** All three tiers are
-  built for PDFs — line citation, cell boxes, and the highlighted page. A spreadsheet
-  row cites its row number and shows its cells, but has no page to draw on. Rendering
-  the row as a small table with the triggering cell highlighted would bring the two
-  formats level.
 - **Scanned PDF support** — needs OCR or a hosted vision extractor. Currently
   refused with a clear error, a defensible v1 position.
 - **Stage 3's AI layer** — specced, never built. Rules only. Keep it strictly

@@ -76,8 +76,21 @@ workbook and were only visible in the logs:
 
 - `Parsed N rows ... without the model` — the deterministic path handled it
 - `foots: N rows total X` — the file agrees with its own printed totals
-- `Corrected N amount(s) ... against the running balance` — a few is normal; many
-  means the column geometry is being misread
+- `Corrected N amount(s) ... against the running balance` — **read this together with
+  the convention line below before concluding anything.** A PDF ledger is parsed under
+  both Debit/Credit conventions, and the inverted one has *every* row corrected as a
+  matter of course; on the real ledger that is 17 of 17, and it is normal. What would
+  be alarming is many corrections on the reading that *won*, or on a bank statement,
+  where only one reading is ever parsed — that does mean the column geometry is being
+  misread.
+- `Ledger convention cannot change the result: ...` — both readings agree. The message
+  says why: either no Debit/Credit split in the file, or a split whose readings
+  converge because the balance audit rewrote the inverted one.
+- `Ledger convention detected: 'x' (matches by convention: ...)` — the readings
+  genuinely differed and one reconciled better. A near-tie here is worth a look.
+- `Located N of M PDF row(s) geometrically` — source highlighting found the rows.
+  N < M costs only the picture; the page-and-line citation still stands.
+- `Rendered N page image(s)` — the cited pages travelling with the result.
 - `does not foot` — a row was dropped or double-counted
 - `prints no opening balance` — row 1 rests on column position alone; check it
 - `PDFExtractionError` — extraction refused rather than publish wrong figures
@@ -96,7 +109,15 @@ Nine workbook tabs, mirrored by the browser dashboard:
   explained. On a real file these should be recognisable: uncleared cheques,
   un-booked charges, deposits in transit.
 - **Anomalies** — if it floods, calibrate `AnomalyConfig` for this client rather
-  than assuming the rule is wrong.
+  than assuming the rule is wrong. Thresholds are sent per run as an `anomaly_config`
+  JSON field; `GET /anomaly-config` returns the defaults to edit.
+
+Every row on screen opens onto its source behind **Show source**: the file, the page
+and line (or spreadsheet row), the line verbatim, the rule that fired, and — for PDFs
+— the row highlighted on the rendered page with the triggering figure outlined. Where
+the balance audit overrode a misread figure, both the printed and the used amount are
+shown. Check a flagged row against its source before acting on it; that is what the
+citation is for.
 
 ## The standing gap list
 
@@ -114,9 +135,12 @@ Roughly in order of value:
   cap is in place (`MAX_UPLOAD_MB`, default 25).
 - **Re-run `scripts/eval_confirmer.py` with real pairs** once known-answer matches
   from actual statements exist. The current 15 cases are constructions.
-- **Reconsider whether Stage 2 earns its place** — it has contributed nothing on any
-  dataset since Stage 1.5 landed. Keeping it costs nothing when it does not fire,
-  but do not mistake it for a working stage.
+- **Reconsider whether Stage 2 earns its place** — measured, not guessed: on a full
+  instrumented run of the real pair the chat model was called **zero** times and the
+  embedding model twice, on 3 leftover rows, producing no confirmations. It has
+  contributed nothing on any dataset since Stage 1.5 landed. Keeping it costs nothing
+  when it does not fire, but do not mistake it for a working stage. If it is dropped,
+  the embedding server and half the eval harness go with it.
 
 ## Rules of engagement, learned the hard way
 
@@ -125,8 +149,13 @@ Roughly in order of value:
 - **Measure thresholds; never guess.** Pick the middle of a plateau, and record the
   measurement in a comment next to the value.
 - **Fail loudly.** A wrong number in a financial report is worse than no report.
-- **Re-run `scripts/eval_confirmer.py` after any confirmer prompt change.** It has
-  swung from 0 to 4 false positives on a plausible-looking edit.
+- **Re-run `scripts/eval_confirmer.py` after any change to the confirmer prompt, the
+  model, the threshold, or the sampling settings.** It has swung from 0 to 4 false
+  positives on a plausible-looking prompt edit. `temperature=0` alone did not make it
+  reproducible either — the seed is pinned and prompt-cache reuse refused in
+  `app/local_llm.py`, and five consecutive runs are byte-identical only because of it.
+  Re-measure over several runs, not one: the divergence that exposed this appeared
+  once in five.
 - **Verify against the source document, not the generated output.** Several bugs
   looked fine in the workbook and were visible only in the terminal or the PDF.
 - **A test's docstring says which bug it exists for.** Read it before changing the

@@ -2,9 +2,10 @@
 
 State, not plan. `workflow.md` holds the plan; this file says what exists and why.
 
-**Last updated:** 2026-08-27, after closing three gaps from the standing list:
-ledger convention detection for CSV/Excel, per-client anomaly thresholds, and an
-upload size cap.
+**Last updated:** 2026-08-27. That session closed three gaps from the standing list
+(ledger convention detection for CSV/Excel, per-client anomaly thresholds, an upload
+size cap), made Stage 2 reproducible, and built source grounding end to end — every
+reported row now traces to the line, cell and page it was read from.
 
 > Numbers here go stale. Re-check with the commands under "Check current state"
 > rather than believing anything written down.
@@ -32,7 +33,7 @@ nothing — not even a webfont — leaves the machine holding the client's data.
 | 1.5 Near-matching | fee/rounding-sized gaps + corresponding payee | No |
 | 2 AI net | embeddings shortlist → LLM confirmation | Yes |
 | 3 Anomalies | duplicates, thresholds, round numbers, reversals, gaps | No |
-| Report | nine tabs, organised by what a reviewer must DO | — |
+| Report | nine tabs, organised by what a reviewer must DO, every row traceable to its source line and cell | — |
 
 **The model does almost nothing, deliberately.** Stage 1.5 was measured against
 Stage 2 and replaced 100% of its output on every dataset tested, including the real
@@ -62,6 +63,12 @@ the value.
 ## Verified working
 
 - **192 tests**, fully offline (model clients use `httpx.MockTransport`).
+- **How much AI actually runs, measured** — the HTTP client was instrumented for a
+  full run of the real pair: **0 chat-model calls** (0 for PDF extraction, 0 Stage 2
+  confirmations) and **2 embedding requests covering 3 texts** — the leftover
+  unmatched rows, shortlisted and then not worth confirming. No LLM decided any of
+  the 16 matches, any of the 35 extracted rows, or any anomaly flag. The engine is
+  deterministic code with a backstop that does not fire.
 - **Real HDFC statement + client ledger** reconcile correctly: 15 matched by Stage 1,
   1 by Stage 1.5 (a deliberate ₹500 typo), 0 needed the model, and the 3 remaining
   rows are genuine reconciling items — two un-booked bank charges and a deposit in
@@ -139,6 +146,11 @@ understanding which silent failure it prevents.
   — backwards for the client's own Bank A/c ledger, which is the usual counterpart to
   a statement. A sheet with one signed Amount column reads the same either way and is
   reported as unambiguous rather than as a tie.
+- **Printed figure kept beside the corrected one** (`Transaction.printed_amount`) —
+  the balance audit rewrites a misread amount, so the cited source line can show one
+  figure while the reconciliation used another. Left unexplained that reads as a
+  contradiction in the very place the report is asking to be trusted. Both are shown,
+  with the balance named as the reason they differ.
 - **Upload size cap** (`MAX_UPLOAD_MB`, default 25) — an upload is buffered whole,
   both sides at once, so a mis-dropped video or disk image would be read into memory
   before anything inspected it. Checked chunk by chunk while reading rather than from

@@ -595,8 +595,12 @@
       state.ledger = file;
       ledgerFilenameEl.textContent = file.name;
       ledgerZone.classList.add("has-file");
-      ledgerTemplateRow.classList.toggle("visible", ext === ".pdf");
-      if (ext !== ".pdf") state.ledgerTemplate = null;
+      // Shown for spreadsheet ledgers too, not only PDFs: a CSV or Excel export
+      // carries the same ambiguous Debit/Credit convention, and the server now
+      // honours an explicit choice on every format. Left blank it auto-detects,
+      // which is the safe default — this is the override for a ledger too small or
+      // too disjoint from the statement for detection to call.
+      ledgerTemplateRow.classList.add("visible");
     }
     updateReconcileEnabled();
   }

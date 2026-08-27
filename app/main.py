@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -11,6 +12,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 # Loads the llama.cpp server URLs (LLAMA_SERVER_URL / LLAMA_EMBEDDING_SERVER_URL),
 # and any API keys for the optional hosted providers, from a local .env file
@@ -22,6 +24,7 @@ from app.ai_matching.confirmer import LocalMatchConfirmer, MatchConfirmer
 from app.ai_matching.embeddings import EmbeddingClient, LocalEmbeddingClient
 from app.ai_matching.matcher import match_with_ai
 from app.ai_matching.models import AIMatchResult
+from app.anomaly.config import AnomalyConfig
 from app.anomaly.detector import detect_anomalies
 from app.anomaly.models import AnomalyResult
 from app.ingestion.bank_templates.base import BankPDFTemplate
@@ -153,14 +156,81 @@ def ledger_templates() -> dict:
     return {"templates": [AUTO_LEDGER_TEMPLATE, *_LEDGER_TEMPLATES]}
 
 
+@app.get("/anomaly-config")
+def anomaly_config_defaults() -> AnomalyConfig:
+    """The thresholds a run uses when none are supplied.
+
+    Exposed so a caller can read the defaults, change the one field this engagement
+    needs and post the result back, rather than having to restate the whole config
+    or read them out of the source.
+    """
+    return AnomalyConfig()
+
+
+def _parse_anomaly_config(raw: str | None) -> AnomalyConfig:
+    """Build the Stage 3 config from a JSON form field, falling back to defaults.
+
+    Thresholds are per-engagement, not fixed policy — a client whose approval limit
+    is 25,00,000 gets nothing useful from flags calibrated to 50,000, and one whose
+    every payment is a round number needs the round-number rule tuned or silent.
+    Sent as one JSON field rather than a form field per threshold so the config can
+    gain settings without the API changing shape, and so pydantic does the
+    validating.
+
+    Unknown or malformed settings are a 422, never a silent fallback to defaults: a
+    typo'd field name that quietly reverted to 50,000 would show a reviewer flags
+    they had explicitly asked not to see, with nothing to indicate why.
+    """
+    if raw is None or not raw.strip():
+        return AnomalyConfig()
+    try:
+        return AnomalyConfig.model_validate_json(raw)
+    except ValidationError as exc:
+        raise HTTPException(
+            422, f"Invalid anomaly_config: {exc.error_count()} problem(s) — {exc}"
+        ) from exc
+
+
 _TEMPLATE_REGISTRIES: dict[Literal["bank", "ledger"], dict[str, BankPDFTemplate]] = {
     "bank": _BANK_TEMPLATES,
     "ledger": _LEDGER_TEMPLATES,
 }
 
 
+# An upload is held in memory whole — extraction needs random access to the file,
+# and both sides are kept at once so the identical-upload check can compare them. A
+# cap keeps a mis-drop (a video, a disk image, a 2 GB export) from taking the box
+# down with it instead of returning an error. Generous by design: statements and
+# ledger exports are well under a megabyte, so anything near this is already a
+# mistake. Override with MAX_UPLOAD_MB for an unusually large multi-year export.
+MAX_UPLOAD_BYTES = int(float(os.getenv("MAX_UPLOAD_MB", "25")) * 1024 * 1024)
+
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
 async def _read_upload(file: UploadFile) -> bytes:
-    return await file.read()
+    """Read an upload into memory, refusing anything over MAX_UPLOAD_BYTES.
+
+    Read in chunks and checked as it goes, so an oversized file is rejected partway
+    rather than after it has already been buffered — checking `file.size` or the
+    Content-Length header instead would mean trusting the client about the very
+    thing being limited.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                413,
+                f"{file.filename or 'The upload'} is larger than the "
+                # :g so a fractional override reads as "0.5 MB", not "0 MB".
+                f"{MAX_UPLOAD_BYTES / (1024 * 1024):g} MB limit. Bank statements and "
+                "ledger exports are far smaller than this, so check that the right "
+                "file was selected; raise MAX_UPLOAD_MB if it genuinely is this big.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _reject_identical_uploads(bank_bytes: bytes, ledger_bytes: bytes) -> None:
@@ -189,10 +259,11 @@ async def _parse_upload(
     pdf_template: str | None,
     vision_extractor: VisionExtractor,
     contents: bytes | None = None,
+    debit_is_inflow: bool = False,
 ) -> list[Transaction]:
     suffix = Path(file.filename or "").suffix.lower()
     if contents is None:
-        contents = await file.read()
+        contents = await _read_upload(file)
     registry = _TEMPLATE_REGISTRIES[source]
 
     with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
@@ -201,9 +272,19 @@ async def _parse_upload(
         tmp_path = Path(tmp.name)
 
         if suffix == ".csv":
-            return parse_csv(tmp_path, source=source, file_name=file.filename)
+            return parse_csv(
+                tmp_path,
+                source=source,
+                file_name=file.filename,
+                debit_is_inflow=debit_is_inflow,
+            )
         if suffix in (".xlsx", ".xls"):
-            return parse_excel(tmp_path, source=source, file_name=file.filename)
+            return parse_excel(
+                tmp_path,
+                source=source,
+                file_name=file.filename,
+                debit_is_inflow=debit_is_inflow,
+            )
         if suffix == ".pdf":
             if pdf_template is None or pdf_template not in registry:
                 raise HTTPException(
@@ -229,9 +310,85 @@ async def ingest(
     template: str | None = Form(default=None),
     vision_extractor: VisionExtractor = Depends(get_vision_extractor),
 ) -> list[Transaction]:
+    # A named ledger template sets the Debit/Credit convention for the tabular
+    # formats too, not only for PDFs. There is no bank side here to detect against,
+    # so on this route an unnamed spreadsheet ledger keeps the default reading —
+    # /reconcile is where detection happens.
+    ledger_template = _LEDGER_TEMPLATES.get(template or "") if source == "ledger" else None
     return await _parse_upload(
-        file, source=source, pdf_template=template, vision_extractor=vision_extractor
+        file,
+        source=source,
+        pdf_template=template,
+        vision_extractor=vision_extractor,
+        debit_is_inflow=bool(ledger_template and ledger_template.debit_is_inflow),
     )
+
+
+# Formats read into a DataFrame rather than through a PDF template. Their
+# Debit/Credit convention is just as ambiguous as a PDF's, so they get the same
+# detection — the hazard belongs to double-entry bookkeeping, not to the file format.
+_TABULAR_SUFFIXES = (".csv", ".xlsx", ".xls")
+
+
+async def _parse_ledger(
+    ledger_file: UploadFile,
+    *,
+    bank_txns: list[Transaction],
+    ledger_template: str | None,
+    vision_extractor: VisionExtractor,
+    contents: bytes,
+) -> list[Transaction]:
+    """Parse the ledger under the Debit/Credit convention that actually reconciles.
+
+    Whether a ledger's Debit means money in depends on which account the ledger
+    covers, and the file rarely says. Reading it backwards inverts every amount
+    without failing loudly. Unless the caller names a convention, both readings are
+    produced and `choose_ledger_convention` keeps whichever corroborates more
+    matches against the bank.
+
+    This used to run for PDFs only, so a CSV or Excel ledger was always read as
+    "Credit means money in" — correct for a party ledger, backwards for the client's
+    own Bank A/c ledger, which is the usual counterpart to a bank statement. That
+    silently inverted every amount in the file, and a named ledger template was
+    ignored outright on those formats.
+    """
+    suffix = Path(ledger_file.filename or "").suffix.lower()
+
+    async def parse_as(name: str | None) -> list[Transaction]:
+        template = _LEDGER_TEMPLATES.get(name or "")
+        return await _parse_upload(
+            ledger_file,
+            source="ledger",
+            pdf_template=name,
+            vision_extractor=vision_extractor,
+            contents=contents,
+            # Only consulted for the tabular formats; a PDF carries the convention
+            # in the template itself.
+            debit_is_inflow=template.debit_is_inflow if template else False,
+        )
+
+    detectable = suffix == ".pdf" or suffix in _TABULAR_SUFFIXES
+    if ledger_template not in (None, AUTO_LEDGER_TEMPLATE) or not detectable:
+        return await parse_as(ledger_template)
+
+    # Parse under every convention and keep whichever reconciles. Cheap: extraction
+    # is deterministic and runs off the already-read bytes, so this costs a second
+    # table parse, not a second model call.
+    candidates = {name: await parse_as(name) for name in _LEDGER_TEMPLATES}
+
+    # A sheet with one signed Amount column reads identically either way, so there
+    # is nothing to choose. Saying so beats reporting a tie as an ambiguous call.
+    readings = list(candidates.values())
+    if all(
+        [t.amount for t in reading] == [t.amount for t in readings[0]]
+        for reading in readings
+    ):
+        logger.info(
+            "Ledger has no Debit/Credit split to interpret — amounts are unambiguous"
+        )
+        return readings[0]
+
+    return choose_ledger_convention(bank_txns, candidates).transactions
 
 
 async def _run_reconciliation(
@@ -243,6 +400,7 @@ async def _run_reconciliation(
     vision_extractor: VisionExtractor,
     embedding_client: EmbeddingClient,
     confirmer: MatchConfirmer,
+    anomaly_config: AnomalyConfig | None = None,
 ) -> tuple[MatchResult, AIMatchResult, AnomalyResult, bytes]:
     """Full pipeline, end to end: ingest both files (Stage 0), deterministic match
     (Stage 1), AI matching net on whatever Stage 1 couldn't resolve (Stage 2),
@@ -262,30 +420,13 @@ async def _run_reconciliation(
         contents=bank_bytes,
     )
 
-    if ledger_pdf_template in (None, AUTO_LEDGER_TEMPLATE) and Path(
-        ledger_file.filename or ""
-    ).suffix.lower() == ".pdf":
-        # Parse the ledger under every convention and keep whichever reconciles.
-        # Cheap: extraction is deterministic and runs off the already-read bytes, so
-        # this costs a second table parse, not a second model call.
-        candidates = {}
-        for name in _LEDGER_TEMPLATES:
-            candidates[name] = await _parse_upload(
-                ledger_file,
-                source="ledger",
-                pdf_template=name,
-                vision_extractor=vision_extractor,
-                contents=ledger_bytes,
-            )
-        ledger_txns = choose_ledger_convention(bank_txns, candidates).transactions
-    else:
-        ledger_txns = await _parse_upload(
-            ledger_file,
-            source="ledger",
-            pdf_template=ledger_pdf_template,
-            vision_extractor=vision_extractor,
-            contents=ledger_bytes,
-        )
+    ledger_txns = await _parse_ledger(
+        ledger_file,
+        bank_txns=bank_txns,
+        ledger_template=ledger_pdf_template,
+        vision_extractor=vision_extractor,
+        contents=ledger_bytes,
+    )
 
     _log_ingestion(bank_txns, ledger_txns)
 
@@ -295,7 +436,7 @@ async def _run_reconciliation(
     ai_result = match_with_ai(
         match_result, embedding_client=embedding_client, confirmer=confirmer
     )
-    anomaly_result = detect_anomalies(match_result)
+    anomaly_result = detect_anomalies(match_result, config=anomaly_config)
     report_bytes = build_report(match_result, ai_result, anomaly_result)
 
     return match_result, ai_result, anomaly_result, report_bytes
@@ -307,6 +448,7 @@ async def reconcile(
     ledger_file: UploadFile = File(...),
     bank_pdf_template: str | None = Form(default=None),
     ledger_pdf_template: str | None = Form(default=None),
+    anomaly_config: str | None = Form(default=None),
     vision_extractor: VisionExtractor = Depends(get_vision_extractor),
     embedding_client: EmbeddingClient = Depends(get_embedding_client),
     confirmer: MatchConfirmer = Depends(get_match_confirmer),
@@ -320,6 +462,7 @@ async def reconcile(
         vision_extractor=vision_extractor,
         embedding_client=embedding_client,
         confirmer=confirmer,
+        anomaly_config=_parse_anomaly_config(anomaly_config),
     )
 
     return StreamingResponse(
@@ -345,6 +488,7 @@ async def reconcile_preview(
     ledger_file: UploadFile = File(...),
     bank_pdf_template: str | None = Form(default=None),
     ledger_pdf_template: str | None = Form(default=None),
+    anomaly_config: str | None = Form(default=None),
     vision_extractor: VisionExtractor = Depends(get_vision_extractor),
     embedding_client: EmbeddingClient = Depends(get_embedding_client),
     confirmer: MatchConfirmer = Depends(get_match_confirmer),
@@ -361,6 +505,7 @@ async def reconcile_preview(
         vision_extractor=vision_extractor,
         embedding_client=embedding_client,
         confirmer=confirmer,
+        anomaly_config=_parse_anomaly_config(anomaly_config),
     )
 
     matched = match_result.matched

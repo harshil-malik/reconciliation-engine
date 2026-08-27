@@ -41,7 +41,12 @@ miss it, and it would surface as an unmatched row on each side — a false discr
 that looks exactly like a real one.
 
 Two real cheques on the tested statement carried a value-date lag (`txn 05/07, value
-07/07`), so the column is populated and available; nothing consumes it yet.
+07/07`), so the column is populated in the text layer. It is not, however, extracted:
+`layout_table._header_columns` classifies "Value Dt" as a date and first-occurrence
+wins, so the leading Date column keeps the slot and the value date is deliberately
+skipped over (`_read_reference` even names it as something not to swallow). There is
+no `value_date` on `Transaction`. Capturing it is a prerequisite for this work, not
+something already done.
 
 Decide, with a real month-boundary file in hand, whether Stage 1 should consider
 value date as an alternative when transaction date fails.
@@ -97,13 +102,16 @@ Nine workbook tabs, mirrored by the browser dashboard:
 
 Roughly in order of value:
 
-- **Wire `AnomalyConfig` to the API** so thresholds can be set per client
+- **Persist an `AnomalyConfig` per client.** The config now reaches the API — both
+  reconcile routes take an `anomaly_config` JSON field and `GET /anomaly-config`
+  returns the defaults to edit — but nothing stores it, so an engagement's thresholds
+  have to be re-sent every run.
 - **Scanned PDF support** — needs OCR or a hosted vision extractor. Currently
   refused with a clear error, a defensible v1 position.
 - **Stage 3's AI layer** — specced, never built. Rules only. Keep it strictly
   separate from Stage 2 matching, per the spec's explicit design rule.
-- **Auth, rate limiting, upload size caps** — before this is exposed to anyone else
-- **Convention auto-detection for CSV/Excel ledgers** (PDF only today)
+- **Auth and rate limiting** — before this is exposed to anyone else. An upload size
+  cap is in place (`MAX_UPLOAD_MB`, default 25).
 - **Re-run `scripts/eval_confirmer.py` with real pairs** once known-answer matches
   from actual statements exist. The current 15 cases are constructions.
 - **Reconsider whether Stage 2 earns its place** — it has contributed nothing on any

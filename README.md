@@ -113,6 +113,24 @@ a row:
 | AI Matched | Model-asserted pairs, kept separate as the least certain |
 | Anomalies | Risk flags, which may also appear above: Stage 3 sees everything |
 
+### Anomaly thresholds
+
+Stage 3's thresholds are per engagement, not fixed policy — a client whose approval
+limit is ₹25,00,000 gets nothing useful from flags calibrated to ₹50,000. `GET
+/anomaly-config` returns the defaults; edit the fields that matter and post the
+result back as an `anomaly_config` JSON form field alongside the files:
+
+```bash
+curl -F bank_file=@bank.pdf -F ledger_file=@ledger.pdf \
+     -F bank_pdf_template=hdfc \
+     -F 'anomaly_config={"approval_thresholds":["2500000"],"timing_gap_days":30}' \
+     http://localhost:8000/reconcile -o report.xlsx
+```
+
+Unrecognised or malformed settings are a 422 rather than a quiet fall back to the
+defaults: a typo'd field name that silently reverted would show a reviewer the flags
+they had explicitly asked not to see, with nothing to indicate why.
+
 Every match carries a **corroboration** label — `reference` (a shared cheque/UTR),
 `description` (payees correspond), or `amount_and_date_only`. The last is where two
 unrelated payments of the same size on the same day would be paired, so those are the
@@ -135,6 +153,21 @@ python scripts/verify_reconciliation.py <bank.pdf> <ledger.pdf>
 3. **The reconciliation identity** — every rupee of difference is attributable to a
    named item. This is the check an accountant applies to a BRS.
 4. **Matched-pair sanity.**
+
+### Which way round a ledger reads
+
+Whether a ledger's Debit means money *in* depends on which account it covers, and the
+file rarely says. Reading it backwards inverts every amount and fails silently —
+nothing errors, the rows just stop agreeing. So the ledger is parsed under both
+conventions and whichever produces more *corroborated* matches against the bank
+wins. This runs for CSV and Excel exports as much as for PDFs; the ambiguity is a
+property of double-entry bookkeeping, not of the file format. A sheet carrying one
+signed Amount column reads the same either way and is reported as unambiguous.
+
+Pick a ledger format explicitly to override the detection — worth doing for a ledger
+too small, or overlapping the statement period too little, for the evidence to
+separate the two readings. The log says which way it went, and says so loudly when
+the call was a tie.
 
 Ingestion has two independent guards of its own. Each amount is checked against its
 own running-balance movement, which catches an OCR slip or a misread column; and the
@@ -180,6 +213,7 @@ No `.env` is needed for the default local setup. To override, copy `.env.example
 | `LLAMA_SERVER_URL` | `http://127.0.0.1:8080` | Chat/extraction server |
 | `LLAMA_EMBEDDING_SERVER_URL` | `http://127.0.0.1:8081` | Embeddings server |
 | `LLAMA_TIMEOUT_SECONDS` | `300` | Per-request timeout (3B on CPU is slow) |
+| `MAX_UPLOAD_MB` | `25` | Largest accepted upload. Statements are far smaller; raise it only for an unusually long multi-year export. |
 
 ### Using a hosted model instead
 
@@ -202,7 +236,7 @@ key in `.env`.
 source .venv/bin/activate && python -m pytest
 ```
 
-166 tests, fully offline — model clients run against an in-memory HTTP transport, so
+174 tests, fully offline — model clients run against an in-memory HTTP transport, so
 no llama.cpp server or API key is needed.
 
 Each test's docstring names the bug it exists for. Several encode failures found on

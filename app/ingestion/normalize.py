@@ -23,13 +23,25 @@ def _clean_cell(value: object) -> object:
 
 
 def normalize_dataframe(
-    df: pd.DataFrame, *, source: Literal["bank", "ledger"], file_name: str
+    df: pd.DataFrame,
+    *,
+    source: Literal["bank", "ledger"],
+    file_name: str,
+    debit_is_inflow: bool = False,
 ) -> list[Transaction]:
     """Turn a raw bank/ledger DataFrame into canonical Transaction rows.
 
     Column names are auto-detected via `detect_columns` — statements from different
     banks/ledgers use different headers (Narration vs Particulars, single Amount vs
     split Debit/Credit, etc.), and this is what absorbs that variance.
+
+    `debit_is_inflow` says which of a split Debit/Credit pair means money coming in,
+    exactly as a PDF template declares it. It is False by default, which reads a
+    Credit as money in — correct for a bank statement and for a party/expense
+    ledger. It must be True for the client's own Bank A/c ledger, where a Debit to
+    the bank asset account is money arriving. Getting it backwards inverts every
+    amount in the file and fails silently, so callers reconciling a ledger should
+    detect it (`choose_ledger_convention`) rather than assume.
     """
     mapping = detect_columns(df)
     transactions: list[Transaction] = []
@@ -45,7 +57,9 @@ def normalize_dataframe(
             amount = to_decimal(row[mapping["amount"]])
         else:
             debit_col, credit_col = mapping["debit_credit"]
-            amount = to_decimal(row[credit_col]) - to_decimal(row[debit_col])
+            debit = to_decimal(row[debit_col])
+            credit = to_decimal(row[credit_col])
+            amount = debit - credit if debit_is_inflow else credit - debit
 
         reference = None
         if "reference" in mapping:

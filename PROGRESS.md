@@ -2,7 +2,9 @@
 
 State, not plan. `workflow.md` holds the plan; this file says what exists and why.
 
-**Last updated:** 2026-08-27, after the first run against a real HDFC statement.
+**Last updated:** 2026-08-27, after closing three gaps from the standing list:
+ledger convention detection for CSV/Excel, per-client anomaly thresholds, and an
+upload size cap.
 
 > Numbers here go stale. Re-check with the commands under "Check current state"
 > rather than believing anything written down.
@@ -59,7 +61,7 @@ the value.
 
 ## Verified working
 
-- **166 tests**, fully offline (model clients use `httpx.MockTransport`).
+- **174 tests**, fully offline (model clients use `httpx.MockTransport`).
 - **Real HDFC statement + client ledger** reconcile correctly: 15 matched by Stage 1,
   1 by Stage 1.5 (a deliberate ₹500 typo), 0 needed the model, and the 3 remaining
   rows are genuine reconciling items — two un-booked bank charges and a deposit in
@@ -109,7 +111,16 @@ understanding which silent failure it prevents.
 - **Ledger convention auto-detection** — whether a ledger's Debit means money in
   depends on which account it covers, and getting it wrong inverts every amount
   silently. Both readings are tried; the one with more *corroborated* matches wins.
-  Scoring by raw match count picks the wrong one — verified.
+  Scoring by raw match count picks the wrong one — verified. Runs for CSV and Excel
+  as well as PDF: the ambiguity belongs to double-entry bookkeeping, not to the file
+  format, and the tabular path used to assume "Credit means money in" unconditionally
+  — backwards for the client's own Bank A/c ledger, which is the usual counterpart to
+  a statement. A sheet with one signed Amount column reads the same either way and is
+  reported as unambiguous rather than as a tie.
+- **Upload size cap** (`MAX_UPLOAD_MB`, default 25) — an upload is buffered whole,
+  both sides at once, so a mis-dropped video or disk image would be read into memory
+  before anything inspected it. Checked chunk by chunk while reading rather than from
+  the client's Content-Length, which is the very thing being limited.
 - **Corroboration labels** — every match records whether it rests on a reference, a
   corresponding description, or nothing but amount and date. Labelled, not blocked:
   measured, no similarity threshold separates the wrong ones from the right ones (an
@@ -172,9 +183,12 @@ one row in sixteen, and there is no labelled training data.
 - **Only HDFC** of the five target banks has a template.
 - **Scanned/image PDFs unsupported** — raise a clear error rather than guessing.
 - **Stage 3's AI layer** was specced but never built (rules only).
-- **`AnomalyConfig` isn't wired to the API** — thresholds can't be set per client.
-- **No auth, rate limiting, or upload size cap.** Fine locally; not for anyone else.
-- CSV/Excel ledgers don't get convention auto-detection (PDF only).
+- **No auth or rate limiting.** Fine locally; not for anyone else. (An upload size
+  cap now exists.)
+- **Anomaly thresholds are per request, not per client.** `/reconcile` and
+  `/reconcile/preview` accept an `anomaly_config` JSON field and `GET /anomaly-config`
+  returns the defaults to edit, but nothing stores a config against a client, so the
+  same engagement's settings must be sent each run.
 
 ## Check current state
 
@@ -183,7 +197,7 @@ cd ~/v-01
 pgrep -fl llama-server                     # both model servers up?
 curl -s localhost:8080/health              # chat  (binds only after weights load)
 curl -s localhost:8081/health              # embeddings
-source .venv/bin/activate && python -m pytest -q          # expect 166 passed
+source .venv/bin/activate && python -m pytest -q          # expect 174 passed
 python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \
                                         sample_data/internal_ledger.pdf
 git log --oneline | head -5

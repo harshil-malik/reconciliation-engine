@@ -62,3 +62,43 @@ def test_raw_row_preserved_for_traceability(bank_df: pd.DataFrame) -> None:
         "Withdrawal Amt": "15000.00",
         "Deposit Amt": "",
     }
+
+
+def test_debit_is_inflow_mirrors_the_signs_of_a_split_debit_credit_sheet() -> None:
+    """A CSV/Excel ledger was always read as "Credit means money in".
+
+    That is right for a party or expense ledger and backwards for the client's own
+    Bank A/c ledger, where a Debit to the bank asset account is money arriving — the
+    usual counterpart to a bank statement. Read the wrong way every amount in the
+    file is inverted and nothing errors; the reconciliation simply collapses.
+    """
+    df = pd.DataFrame(
+        [
+            {"Date": "01/04/24", "Particulars": "Receipt from customer",
+             "Debit": "25000", "Credit": ""},
+            {"Date": "02/04/24", "Particulars": "Payment to supplier",
+             "Debit": "", "Credit": "15075"},
+        ]
+    )
+
+    party = normalize_dataframe(df, source="ledger", file_name="l.csv")
+    assert [t.amount for t in party] == [Decimal("-25000"), Decimal("15075")]
+
+    bank_account = normalize_dataframe(
+        df, source="ledger", file_name="l.csv", debit_is_inflow=True
+    )
+    assert [t.amount for t in bank_account] == [Decimal("25000"), Decimal("-15075")]
+
+
+def test_debit_is_inflow_does_nothing_to_a_single_signed_amount_column(
+    ledger_df: pd.DataFrame,
+) -> None:
+    """A sheet that already carries one signed Amount column states its own
+    direction, so there is no convention left to choose. Callers rely on this: it is
+    what lets convention detection recognise an unambiguous file instead of
+    reporting the two identical readings as a tie."""
+    default = normalize_dataframe(ledger_df, source="ledger", file_name="l.csv")
+    flipped = normalize_dataframe(
+        ledger_df, source="ledger", file_name="l.csv", debit_is_inflow=True
+    )
+    assert [t.amount for t in default] == [t.amount for t in flipped]

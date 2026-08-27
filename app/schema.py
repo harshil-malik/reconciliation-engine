@@ -128,6 +128,10 @@ class Transaction(BaseModel):
     # but their payees are plainly the same.
     counterparty: Optional[str] = None
     source: Literal["bank", "ledger"]
+    # What the document printed for this row, when the running-balance audit found
+    # the printed figure wrong and used the balance movement instead. None means the
+    # printed figure and the figure used are the same.
+    printed_amount: Optional[Decimal] = None
     file_name: str
     # Where this row came from in `file_name`. Optional only so a Transaction can
     # still be constructed in a test without inventing a provenance for it; every

@@ -175,6 +175,10 @@ columns as the file names them, the values as printed, and the cell that trigger
 the flag marked. Each column carries the role ingestion assigned it, so the mapping
 the reviewer is being shown is the one matching actually used.
 
+Where the running-balance audit overrode a misread figure, the citation shows both:
+the amount the document prints and the amount the reconciliation used, with the
+balance named as the reason they differ.
+
 One thing a citation deliberately does not hide: where the per-row balance audit
 corrected a misread figure, the cited line still shows what the statement *printed*,
 while the amount used is the corrected one. Both are on screen together — that
@@ -279,7 +283,7 @@ key in `.env`.
 source .venv/bin/activate && python -m pytest
 ```
 
-189 tests, fully offline — model clients run against an in-memory HTTP transport, so
+191 tests, fully offline — model clients run against an in-memory HTTP transport, so
 no llama.cpp server or API key is needed.
 
 Each test's docstring names the bug it exists for. Several encode failures found on

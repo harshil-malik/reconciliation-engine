@@ -377,16 +377,44 @@ async def _parse_ledger(
     # table parse, not a second model call.
     candidates = {name: await parse_as(name) for name in _LEDGER_TEMPLATES}
 
-    # A sheet with one signed Amount column reads identically either way, so there
-    # is nothing to choose. Saying so beats reporting a tie as an ambiguous call.
+    # Where every reading produces the same amounts there is nothing to choose, and
+    # saying so beats reporting a tie as an ambiguous call — `choose_ledger_convention`
+    # would warn about a coin toss on something that cannot go either way.
+    #
+    # Two different things cause it, and a diagnostic that names the wrong one sends
+    # whoever is debugging an inverted report looking in the wrong place:
+    #   - the file has one signed Amount column, so there is no convention in it;
+    #   - the file does split Debit/Credit, but its rows print a running balance and
+    #     the balance audit rewrote the amounts from the movement, which is
+    #     sign-convention agnostic and so erases the difference between the readings.
     readings = list(candidates.values())
     if all(
         [t.amount for t in reading] == [t.amount for t in readings[0]]
         for reading in readings
     ):
-        logger.info(
-            "Ledger has no Debit/Credit split to interpret — amounts are unambiguous"
-        )
+        # Counted across every reading, not just the one returned. The reading that
+        # got the columns right needs no corrections; it is the INVERTED reading the
+        # audit rewrites, and that is precisely what erases the difference between
+        # them. Looking only at the winner would report "no Debit/Credit split" about
+        # a file that plainly has one.
+        repaired = {
+            name: sum(1 for t in reading if t.printed_amount is not None)
+            for name, reading in candidates.items()
+        }
+        if any(repaired.values()):
+            logger.info(
+                "Ledger Debit/Credit convention cannot change the result: reading it "
+                "as %s needs no correction, while %s is corrected on %s row(s) by the "
+                "running-balance audit, which is sign-convention agnostic — so both "
+                "readings arrive at the same amounts",
+                ", ".join(n for n, c in repaired.items() if not c) or "neither",
+                ", ".join(n for n, c in repaired.items() if c),
+                ", ".join(str(c) for c in repaired.values() if c),
+            )
+        else:
+            logger.info(
+                "Ledger has no Debit/Credit split to interpret — amounts are unambiguous"
+            )
         return readings[0]
 
     return choose_ledger_convention(bank_txns, candidates).transactions
@@ -510,6 +538,12 @@ def _txn_summary(txn: Transaction) -> dict:
         "description": txn.description,
         "reference": txn.reference,
         "source": txn.source,
+        # Present only where the balance audit overrode the printed figure. The
+        # dashboard shows both: the disagreement is the engine's reasoning made
+        # visible, and hiding it would defeat the point of citing a source at all.
+        "printed_amount": (
+            float(txn.printed_amount) if txn.printed_amount is not None else None
+        ),
         "file_name": txn.file_name,
         # The provenance record, so the dashboard can offer a click-through from any
         # flagged row to the line of the uploaded file that produced it. An

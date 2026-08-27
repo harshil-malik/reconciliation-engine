@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 import pdfplumber
@@ -114,3 +115,34 @@ def test_render_is_capped(statement: Path) -> None:
     is dropped."""
     images = render_pages(statement.read_bytes(), range(1, MAX_RENDERED_PAGES + 50))
     assert len(images) <= MAX_RENDERED_PAGES
+
+
+def test_printed_amount_records_what_the_document_said(tmp_path: Path) -> None:
+    """The balance audit rewrites a misread figure, so the amount used can differ
+    from the amount printed on the cited line. A citation showing the line without
+    that disagreement looks like a contradiction; recording the printed figure lets
+    the report show both and say which one it used.
+    """
+    # The Deposit column says 8,340.50 but the balance FALLS by that much, so the
+    # figure was read from the wrong column — the classic misread the audit exists for.
+    path = tmp_path / "misread.pdf"
+    write_text_pdf(
+        [
+            "Opening Balance  : 100,000.00",
+            "",
+            "Date        Narration                          Chq./Ref.No.   Withdrawal Amt.   Deposit Amt.   Closing Balance",
+            "01/07/2026  UPI-RAJESH KUMAR TRADERS           UPI2241                            8,340.50         91,659.50",
+        ],
+        path,
+    )
+
+    txn = _parse(path)[0]
+
+    assert txn.amount == Decimal("-8340.50"), "the balance movement decides"
+    assert txn.printed_amount == Decimal("8340.50"), "what the column actually said"
+
+
+def test_uncorrected_rows_carry_no_printed_amount(statement: Path) -> None:
+    """Absent means the printed figure and the figure used agree, so the report has
+    nothing to explain and should say nothing."""
+    assert all(t.printed_amount is None for t in _parse(statement))

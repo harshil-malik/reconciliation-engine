@@ -466,6 +466,15 @@
     font-size: 11px; color: var(--text-muted); margin-bottom: 8px;
   }
   .source-rule b { color: var(--text); font-weight: 600; }
+  /* The printed figure and the figure used disagree exactly where the running-balance
+     audit corrected a misread. That is the engine showing its working, so it is
+     stated plainly rather than smoothed over. */
+  .amount-corrected {
+    font-size: 11.5px; margin-top: 6px; padding: 5px 8px; border-radius: 4px;
+    background: var(--warning-bg); border: 1px solid var(--warning-border);
+    color: var(--warning-text);
+  }
+  .amount-corrected b { font-weight: 600; }
 
   .anomaly-card {
     border-radius: 10px;
@@ -852,9 +861,18 @@
       : ref.text
         ? `<pre class="source-text">${escapeHtml(ref.text)}</pre>`
         : `<div class="source-missing">${escapeHtml(ref.label)}</div>`;
+    // Where the two disagree the reviewer must be told which figure the
+    // reconciliation used, or the highlighted cell looks like a contradiction.
+    const corrected = (txn.printed_amount !== null && txn.printed_amount !== undefined)
+      ? `<div class="amount-corrected">This row prints <b>${fmtAmount(txn.printed_amount)}</b>,
+           but its running balance moves by <b>${fmtAmount(txn.amount)}</b>, which is the
+           figure used. The printed column was misread — the balance is the independent check.</div>`
+      : "";
+
     return `<div class="source-block">
       <div class="source-head">${label} · ${file} · <span class="source-loc">${escapeHtml(ref.label)}</span></div>
       ${body}
+      ${corrected}
       ${pageImage(txn)}
     </div>`;
   }

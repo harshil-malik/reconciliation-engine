@@ -524,3 +524,52 @@ def test_spreadsheet_citation_carries_its_cells_and_their_roles() -> None:
         # Exactly one money column carries a figure — that is the cell to mark.
         money = [c for c in cells if c["field"] in ("debit", "credit") and c["value"]]
         assert len(money) == 1
+
+
+def test_ledger_convention_diagnostic_names_why_the_readings_agree(caplog) -> None:
+    """Two different things make both readings agree, and naming the wrong one sends
+    whoever is debugging an inverted report looking in the wrong place.
+
+    A ledger printing a running balance is corrected by the balance audit, which is
+    sign-convention agnostic — so the INVERTED reading gets rewritten back and the two
+    converge. Counting corrections only on the reading that won would find zero (it
+    was the correct one all along) and wrongly report the file as having no
+    Debit/Credit split at all.
+    """
+    from scripts.make_sample_data import write_text_pdf
+    import tempfile
+    from pathlib import Path as _Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf = _Path(tmp) / "ledger.pdf"
+        write_text_pdf(
+            [
+                "Opening Balance  : 100,000.00",
+                "",
+                "Date        Particulars                     Voucher No.    Debit          Credit         Balance",
+                "01/07/2026  Rajesh Kumar Traders INV2241    UPI2241        12,450.00                     112,450.00",
+                "02/07/2026  Globex Supplies INV8340         NFT8340                       8,340.50       104,109.50",
+            ],
+            pdf,
+        )
+        bank_csv = (
+            b"Date,Narration,Chq/Ref No,Withdrawal Amt,Deposit Amt\n"
+            b"01/07/26,UPI-RAJESH KUMAR TRADERS-INV2241,UPI2241,,12450.00\n"
+            b"02/07/26,NEFT-GLOBEX SUPPLIES-INV8340,NFT8340,8340.50,\n"
+        )
+
+        with caplog.at_level("INFO", logger="app.main"):
+            response = client.post(
+                "/reconcile/preview",
+                files={
+                    "bank_file": ("bank.csv", bank_csv, "text/csv"),
+                    "ledger_file": ("ledger.pdf", pdf.read_bytes(), "application/pdf"),
+                },
+            )
+
+    assert response.status_code == 200
+    messages = " ".join(r.getMessage() for r in caplog.records)
+    assert "running-balance audit" in messages
+    assert "cannot change the result" in messages
+    # The misleading claim this replaced.
+    assert "no Debit/Credit split" not in messages

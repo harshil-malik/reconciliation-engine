@@ -130,6 +130,7 @@ def _reconcile_against_balances(
                 f"recovered {delta} from the balance movement"
             )
             corrected[i] = delta
+            rows[i]["amount_as_printed"] = str(amounts[i])
             continue
 
         seen = {
@@ -143,6 +144,7 @@ def _reconcile_against_balances(
                 f"balance delta says {delta}"
             )
             corrected[i] = delta
+            rows[i]["amount_as_printed"] = str(amounts[i])
             continue
 
         raise PDFExtractionError(
@@ -298,6 +300,16 @@ def parse_pdf(
                 reference=str(reference).strip() if reference else None,
                 source=source,
                 file_name=resolved_name,
+                # Set only where the balance audit overrode what the columns said, so
+                # a citation can show the figure the document prints alongside the one
+                # the reconciliation used. They disagree exactly where the engine
+                # corrected a misread, which is evidence a reviewer should see rather
+                # than something to smooth over.
+                printed_amount=(
+                    Decimal(raw_row["amount_as_printed"])
+                    if raw_row.get("amount_as_printed") is not None
+                    else None
+                ),
                 source_ref=source_ref,
                 raw_row=raw_row,
             )

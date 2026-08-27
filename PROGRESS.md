@@ -61,7 +61,7 @@ the value.
 
 ## Verified working
 
-- **189 tests**, fully offline (model clients use `httpx.MockTransport`).
+- **191 tests**, fully offline (model clients use `httpx.MockTransport`).
 - **Real HDFC statement + client ledger** reconcile correctly: 15 matched by Stage 1,
   1 by Stage 1.5 (a deliberate ₹500 typo), 0 needed the model, and the 3 remaining
   rows are genuine reconciling items — two un-booked bank charges and a deposit in
@@ -127,7 +127,13 @@ understanding which silent failure it prevents.
 - **Ledger convention auto-detection** — whether a ledger's Debit means money in
   depends on which account it covers, and getting it wrong inverts every amount
   silently. Both readings are tried; the one with more *corroborated* matches wins.
-  Scoring by raw match count picks the wrong one — verified. Runs for CSV and Excel
+  Scoring by raw match count picks the wrong one — verified. Where every reading
+  produces the same amounts the call is reported as unable to matter rather than as a
+  tie, and the diagnostic names which of the two causes applies: no Debit/Credit split
+  in the file at all, or a split whose readings converge because the running-balance
+  audit — being sign-convention agnostic — rewrites the inverted one. Counting
+  corrections on the winning reading alone finds none, since that reading was right to
+  begin with; they have to be counted across every candidate. Runs for CSV and Excel
   as well as PDF: the ambiguity belongs to double-entry bookkeeping, not to the file
   format, and the tabular path used to assume "Credit means money in" unconditionally
   — backwards for the client's own Bank A/c ledger, which is the usual counterpart to
@@ -221,7 +227,7 @@ cd ~/v-01
 pgrep -fl llama-server                     # both model servers up?
 curl -s localhost:8080/health              # chat  (binds only after weights load)
 curl -s localhost:8081/health              # embeddings
-source .venv/bin/activate && python -m pytest -q          # expect 189 passed
+source .venv/bin/activate && python -m pytest -q          # expect 191 passed
 python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \
                                         sample_data/internal_ledger.pdf
 git log --oneline | head -5

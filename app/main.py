@@ -44,6 +44,7 @@ from app.matching.models import MatchResult
 from app.matching.near_matcher import match_near
 from app.report.builder import build_report
 from app.report.classify import classify_unmatched, match_issue, reconciliation_summary
+from app import store
 from app.schema import Transaction
 
 logger = logging.getLogger(__name__)
@@ -166,6 +167,133 @@ def anomaly_config_defaults() -> AnomalyConfig:
     or read them out of the source.
     """
     return AnomalyConfig()
+
+
+# ----------------------------------------------------------------- clients
+#
+# A CA carries many clients at once and comes back to an engagement weeks later, so a
+# reconciliation is worth little as a one-shot view that vanishes on refresh. Runs are
+# filed against a client and kept, with the documents they were produced from, so the
+# same click-through to the source works on a run from three months ago.
+
+
+@app.get("/clients")
+def clients() -> dict:
+    return {"clients": store.list_clients()}
+
+
+@app.post("/clients", status_code=201)
+def add_client(name: str = Form(...)) -> dict:
+    try:
+        return store.create_client(name)
+    except store.DuplicateClientError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.patch("/clients/{client_id}")
+def edit_client(client_id: str, name: str = Form(...)) -> dict:
+    try:
+        updated = store.rename_client(client_id, name)
+    except store.DuplicateClientError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if updated is None:
+        raise HTTPException(404, "No such client.")
+    return updated
+
+
+@app.delete("/clients/{client_id}")
+def remove_client(client_id: str) -> dict:
+    """Delete a client along with every run and document filed under it.
+
+    A real delete, not a hidden flag: this holds client financial data, and someone
+    removing a client is asking for it to be gone.
+    """
+    if not store.delete_client(client_id):
+        raise HTTPException(404, "No such client.")
+    return {"deleted": client_id}
+
+
+@app.get("/clients/{client_id}/runs")
+def client_runs(client_id: str) -> dict:
+    if store.get_client(client_id) is None:
+        raise HTTPException(404, "No such client.")
+    return {"runs": store.list_runs(client_id)}
+
+
+@app.get("/runs/{run_id}")
+def run(run_id: str) -> dict:
+    """Re-open a stored run exactly as it was shown when it was produced.
+
+    Page images are rendered again from the documents kept with the run rather than
+    stored alongside the result: they are reproducible, and storing both would make
+    every run carry a second copy of its own statement.
+    """
+    stored = store.get_run(run_id)
+    if stored is None:
+        raise HTTPException(404, "No such run.")
+
+    documents = store.get_run_documents(run_id)
+    uploads = {name: content for name, content in documents.values()}
+    stored["result"]["page_images"] = _page_images_for_result(uploads, stored["result"])
+    return stored
+
+
+@app.get("/runs/{run_id}/report.xlsx")
+def run_report(run_id: str) -> StreamingResponse:
+    stored = store.get_run_workbook(run_id)
+    if stored is None:
+        raise HTTPException(404, "No such run.")
+    _, workbook = stored
+    return StreamingResponse(
+        io.BytesIO(workbook),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=reconciliation_report.xlsx"},
+    )
+
+
+@app.delete("/runs/{run_id}")
+def remove_run(run_id: str) -> dict:
+    if not store.delete_run(run_id):
+        raise HTTPException(404, "No such run.")
+    return {"deleted": run_id}
+
+
+def _page_images_for_result(
+    uploads: dict[str, bytes], result: dict
+) -> dict[str, dict[str, str]]:
+    """Render the pages a stored result's citations point at.
+
+    Works from the saved payload rather than from Transaction objects, since a run
+    reopened from history has only the JSON it was stored as.
+    """
+    cited: dict[str, set[int]] = {}
+    rows = (
+        [pair["bank"] for pair in result.get("matched", [])]
+        + [pair["ledger"] for pair in result.get("matched", [])]
+        + [pair["bank"] for pair in result.get("ai_matched", [])]
+        + [pair["ledger"] for pair in result.get("ai_matched", [])]
+        + result.get("unmatched_bank", [])
+        + result.get("unmatched_ledger", [])
+        + [txn for flag in result.get("anomalies", []) for txn in flag["transactions"]]
+    )
+    for row in rows:
+        ref = row.get("source_ref") or {}
+        if ref.get("kind") == "pdf_line" and ref.get("page"):
+            cited.setdefault(row.get("file_name") or "", set()).add(ref["page"])
+
+    images: dict[str, dict[str, str]] = {}
+    for name, pages in cited.items():
+        data = uploads.get(name)
+        if not data:
+            continue
+        rendered = render_pages(data, pages)
+        if rendered:
+            images[name] = {str(page): url for page, url in rendered.items()}
+    return images
 
 
 def _parse_anomaly_config(raw: str | None) -> AnomalyConfig:
@@ -505,32 +633,6 @@ async def reconcile(
     )
 
 
-def _cited_page_images(
-    uploads: dict[str, bytes], transactions: list[Transaction]
-) -> dict[str, dict[str, str]]:
-    """Render only the pages a citation actually points at, per file.
-
-    Keyed by file name so the dashboard can show the right document for either side
-    of a pair. Pages nothing was flagged on are never rendered: a reviewer will not
-    open them, and they would cost the response for nothing.
-    """
-    cited: dict[str, set[int]] = {}
-    for txn in transactions:
-        ref = txn.source_ref
-        if ref and ref.kind == "pdf_line" and ref.page:
-            cited.setdefault(txn.file_name, set()).add(ref.page)
-
-    images: dict[str, dict[str, str]] = {}
-    for name, pages in cited.items():
-        data = uploads.get(name)
-        if not data:
-            continue
-        rendered = render_pages(data, pages)
-        if rendered:
-            images[name] = {str(page): url for page, url in rendered.items()}
-    return images
-
-
 def _txn_summary(txn: Transaction) -> dict:
     return {
         "date": txn.date.isoformat(),
@@ -559,6 +661,7 @@ async def reconcile_preview(
     bank_pdf_template: str | None = Form(default=None),
     ledger_pdf_template: str | None = Form(default=None),
     anomaly_config: str | None = Form(default=None),
+    client_id: str | None = Form(default=None),
     vision_extractor: VisionExtractor = Depends(get_vision_extractor),
     embedding_client: EmbeddingClient = Depends(get_embedding_client),
     confirmer: MatchConfirmer = Depends(get_match_confirmer),
@@ -595,7 +698,7 @@ async def reconcile_preview(
         if row["item"]
     }
 
-    return {
+    payload = {
         "summary": {
             "bank_total": summary_by_item["Bank transactions"]["amount"],
             "bank_count": summary_by_item["Bank transactions"]["count"],
@@ -642,9 +745,37 @@ async def reconcile_preview(
         # Tier 3 of source grounding: the cited pages themselves, so a reviewer can
         # be shown the row highlighted on the document rather than told where it is.
         # Keyed by file name, then page number.
-        "page_images": _cited_page_images(uploads, bank_txns_all + ledger_txns_all),
         "report_base64": base64.b64encode(report_bytes).decode("ascii"),
     }
+
+    # Rendered from the same helper the history route uses, so a run reopened from
+    # storage is built the same way as the one just produced.
+    payload["page_images"] = _page_images_for_result(uploads, payload)
+
+    # Filed against a client when one was chosen, with the documents it was run on.
+    # Saving must never cost the reviewer the result they are looking at, so a
+    # failure here is reported in the payload rather than raised.
+    if client_id:
+        try:
+            saved = store.save_run(
+                client_id=client_id,
+                result=payload,
+                workbook=report_bytes,
+                documents={
+                    "bank": (bank_file.filename or "bank", uploads[bank_file.filename or ""]),
+                    "ledger": (ledger_file.filename or "ledger", uploads[ledger_file.filename or ""]),
+                },
+                bank_template=bank_pdf_template,
+                ledger_template=ledger_pdf_template,
+            )
+            payload["saved_run"] = {**saved, "client_id": client_id}
+        except LookupError:
+            raise HTTPException(404, "No such client.") from None
+        except Exception:  # noqa: BLE001 - the reconciliation is worth more than the filing
+            logger.exception("Could not save this run to the client's history")
+            payload["saved_run"] = None
+
+    return payload
 
 
 # Mounted last so it only catches requests that don't match an API route above

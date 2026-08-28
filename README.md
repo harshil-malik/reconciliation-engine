@@ -184,6 +184,34 @@ corrected a misread figure, the cited line still shows what the statement *print
 while the amount used is the corrected one. Both are on screen together — that
 disagreement is evidence a reviewer should see, not something to paper over.
 
+## Clients and history
+
+A reconciliation is worth little as a one-shot view that vanishes on refresh: a CA
+carries many engagements at once and returns to one weeks later. Runs are filed
+against a client and kept.
+
+The sidebar lists clients, most recently active first, and that client's past
+reconciliations. Opening one restores the dashboard exactly as it was produced —
+including its source citations, because the uploaded statement and ledger are stored
+with the run and the cited pages are rendered again from them.
+
+| Route | Purpose |
+| --- | --- |
+| `GET/POST /clients` | List or add. Names are unique case-insensitively. |
+| `PATCH/DELETE /clients/{id}` | Rename, or delete along with every run and document under it. |
+| `GET /clients/{id}/runs` | That client's history, newest first. |
+| `GET /runs/{id}` | Reopen a stored run. |
+| `GET /runs/{id}/report.xlsx` | The workbook as it was built that day. |
+
+Pass `client_id` to `/reconcile/preview` to file a run. Without it the reconciliation
+still runs and is shown — it simply is not kept, because putting filing in front of
+the work would be the wrong way round.
+
+Everything lives in **`data/reconciliation.db`**, a gitignored SQLite file. It holds
+every reconciliation, the client documents themselves, and the workbooks built from
+them — the largest concentration of client financial data in the project. Point
+`RECONCILIATION_DB` elsewhere to move it.
+
 ## How correctness is checked
 
 The engine does not ask to be trusted. `scripts/verify_reconciliation.py` proves a
@@ -283,7 +311,7 @@ key in `.env`.
 source .venv/bin/activate && python -m pytest
 ```
 
-192 tests, fully offline — model clients run against an in-memory HTTP transport, so
+201 tests, fully offline — model clients run against an in-memory HTTP transport, so
 no llama.cpp server or API key is needed.
 
 Each test's docstring names the bug it exists for. Several encode failures found on

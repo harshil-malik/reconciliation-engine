@@ -12,3 +12,7 @@ models/
 sample_data/
 # Real client statements — never commit. Financial data, redacted or not.
 private/
+# Saved client history: the SQLite database holds every reconciliation a CA has run,
+# the uploaded statements and ledgers themselves, and the workbooks built from them.
+# It is the single largest concentration of client financial data in the project.
+data/

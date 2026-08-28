@@ -66,6 +66,71 @@
   button { font-family: inherit; cursor: pointer; }
   .mono { font-family: "IBM Plex Mono", monospace; }
 
+  /* ---------- client sidebar ----------
+     A CA carries many clients at once and returns to an engagement weeks later, so
+     the work has to be filed somewhere and found again. The sidebar is the index:
+     who this is for, and everything already run for them. */
+
+  :root { --sidebar-w: 268px; }
+
+  body { padding-left: var(--sidebar-w); }
+
+  #sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-w);
+    display: flex; flex-direction: column;
+    background: var(--panel, rgba(127,127,127,0.05));
+    border-right: 1px solid var(--border);
+    z-index: 20;
+  }
+  .sb-head { padding: 18px 16px 12px; border-bottom: 1px solid var(--border); }
+  .sb-title { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+  .sb-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  .sb-section { padding: 14px 16px 8px; }
+  .sb-label {
+    font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted); display: flex; justify-content: space-between; align-items: center;
+  }
+  .sb-add {
+    background: none; border: none; color: var(--accent); font-size: 16px; line-height: 1;
+    padding: 0 2px; cursor: pointer;
+  }
+  .sb-add:hover { color: var(--accent-dark); }
+
+  .client-list, .run-list { list-style: none; margin: 8px 0 0; padding: 0; }
+  .client-list li, .run-list li { margin-bottom: 2px; }
+
+  .client-row, .run-row {
+    width: 100%; text-align: left; background: none; border: 1px solid transparent;
+    border-radius: 6px; padding: 7px 9px; font-size: 12.5px; color: var(--text);
+    display: block;
+  }
+  .client-row:hover, .run-row:hover { background: rgba(127,127,127,0.10); }
+  .client-row.active, .run-row.active {
+    background: rgba(127,127,127,0.14); border-color: var(--border); font-weight: 500;
+  }
+  .client-row .count { float: right; color: var(--text-muted); font-size: 11px; font-weight: 400; }
+  .run-row .when { font-size: 12px; }
+  .run-row .stat { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+  .run-row .flag { color: var(--error-text); font-weight: 600; }
+
+  .sb-runs { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
+  .sb-empty { font-size: 11.5px; color: var(--text-muted); padding: 8px 2px; line-height: 1.5; }
+
+  .sb-foot { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .sb-new {
+    width: 100%; padding: 8px; font-size: 12.5px; border-radius: 6px;
+    border: 1px solid var(--border); background: none; color: var(--text);
+  }
+  .sb-new:hover { background: rgba(127,127,127,0.10); }
+
+  @media (max-width: 860px) {
+    body { padding-left: 0; }
+    #sidebar { position: static; width: auto; height: auto; border-right: none;
+               border-bottom: 1px solid var(--border); }
+    .sb-runs { max-height: 220px; }
+  }
+
   /* ---------- upload view ---------- */
 
   #upload-view {
@@ -499,6 +564,27 @@
 </head>
 <body>
 
+<aside id="sidebar">
+  <div class="sb-head">
+    <div class="sb-title">Reconciliation Engine</div>
+    <div class="sb-sub" id="sb-context">No client selected</div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-label">Clients <button class="sb-add" id="add-client" title="Add a client">+</button></div>
+    <ul class="client-list" id="client-list"></ul>
+  </div>
+
+  <div class="sb-section" style="padding-bottom:4px;">
+    <div class="sb-label">History</div>
+  </div>
+  <div class="sb-runs"><ul class="run-list" id="run-list"></ul></div>
+
+  <div class="sb-foot">
+    <button class="sb-new" id="sb-new-run">New reconciliation</button>
+  </div>
+</aside>
+
 <div id="upload-view">
   <main>
     <header>
@@ -614,7 +700,13 @@
 </div>
 
 <script>
-  const state = { bank: null, ledger: null, bankTemplate: null, ledgerTemplate: null, result: null };
+  const state = {
+    bank: null, ledger: null, bankTemplate: null, ledgerTemplate: null, result: null,
+    // Which client this work is filed under, which stored run is on screen, and the
+    // filenames of that run — a run reopened from history has no File objects behind
+    // it, so its header cannot read them off the upload boxes.
+    clientId: null, runId: null, storedFiles: null,
+  };
 
   const bankZone = document.getElementById("bank-zone");
   const ledgerZone = document.getElementById("ledger-zone");
@@ -1034,8 +1126,12 @@
     state.result = data;
     RESULTS = data;
 
+    const names = state.storedFiles
+      ? state.storedFiles
+      : { bank: state.bank && state.bank.name, ledger: state.ledger && state.ledger.name };
+    const client = currentClient();
     document.getElementById("results-filenames").textContent =
-      `${state.bank.name} → ${state.ledger.name}`;
+      `${client ? client.name + " · " : ""}${names.bank || "?"} → ${names.ledger || "?"}`;
 
     document.getElementById("stat-bank-total").textContent = fmtAmount(data.summary.bank_total);
     document.getElementById("stat-bank-count").textContent = `${data.summary.bank_count} rows`;
@@ -1066,6 +1162,131 @@
     document.getElementById("results-view").style.display = "block";
   }
 
+  // ---------- clients and history ----------
+
+  const CLIENT_KEY = "reconciliation.clientId";
+  let CLIENTS = [];
+
+  function fmtWhen(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    const today = new Date();
+    const sameDay = d.toDateString() === today.toDateString();
+    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return sameDay ? `Today ${time}` : d.toLocaleDateString([], { day: "numeric", month: "short" }) + ` ${time}`;
+  }
+
+  function currentClient() {
+    return CLIENTS.find((c) => c.id === state.clientId) || null;
+  }
+
+  async function loadClients() {
+    try {
+      CLIENTS = (await (await fetch("/clients")).json()).clients;
+    } catch { CLIENTS = []; }
+
+    // Fall back to the most recently active client rather than none: landing with
+    // nothing selected makes the first reconciliation of a session unsaveable by
+    // default, which is the case a history feature exists to prevent.
+    if (!CLIENTS.some((c) => c.id === state.clientId)) {
+      state.clientId = CLIENTS.length ? CLIENTS[0].id : null;
+    }
+    if (state.clientId) localStorage.setItem(CLIENT_KEY, state.clientId);
+
+    document.getElementById("client-list").innerHTML = CLIENTS.length
+      ? CLIENTS.map((c) => `
+          <li><button class="client-row ${c.id === state.clientId ? "active" : ""}" data-client="${c.id}">
+            ${escapeHtml(c.name)}<span class="count">${c.run_count || 0}</span>
+          </button></li>`).join("")
+      : `<div class="sb-empty">No clients yet. Add one with + to start filing reconciliations against it.</div>`;
+
+    document.querySelectorAll("[data-client]").forEach((el) =>
+      el.addEventListener("click", () => selectClient(el.dataset.client)));
+
+    const client = currentClient();
+    document.getElementById("sb-context").textContent = client ? client.name : "No client selected";
+    await loadRuns();
+  }
+
+  async function selectClient(id) {
+    state.clientId = id;
+    localStorage.setItem(CLIENT_KEY, id);
+    await loadClients();
+  }
+
+  async function loadRuns() {
+    const list = document.getElementById("run-list");
+    if (!state.clientId) {
+      list.innerHTML = `<div class="sb-empty">Select a client to see their past reconciliations.</div>`;
+      return;
+    }
+    let runs = [];
+    try {
+      runs = (await (await fetch(`/clients/${state.clientId}/runs`)).json()).runs;
+    } catch { runs = []; }
+
+    list.innerHTML = runs.length
+      ? runs.map((r) => {
+          const s = r.summary || {};
+          // UNEXPLAINED is the balancing proof; anything but zero means a row was
+          // mismatched, double-counted or dropped, and it belongs on the card rather
+          // than three clicks in.
+          const bad = s.unexplained !== 0 && s.unexplained !== null && s.unexplained !== undefined;
+          const open = (s.unmatched_bank || 0) + (s.unmatched_ledger || 0);
+          return `<li><button class="run-row ${r.id === state.runId ? "active" : ""}" data-run="${r.id}">
+            <div class="when">${fmtWhen(r.created_at)}</div>
+            <div class="stat">${s.matched || 0} matched · ${open} open${s.anomalies ? ` · ${s.anomalies} flagged` : ""}${bad ? ` · <span class="flag">unexplained</span>` : ""}</div>
+          </button></li>`;
+        }).join("")
+      : `<div class="sb-empty">Nothing run for this client yet.</div>`;
+
+    document.querySelectorAll("[data-run]").forEach((el) =>
+      el.addEventListener("click", () => openRun(el.dataset.run)));
+  }
+
+  async function openRun(runId) {
+    setStatus("", "");
+    try {
+      const response = await fetch(`/runs/${runId}`);
+      if (!response.ok) throw new Error("Could not open that run.");
+      const stored = await response.json();
+      state.runId = runId;
+      // A stored run has no File objects behind it, so the header reads its filenames
+      // from the record rather than from whatever is sitting in the upload boxes.
+      state.storedFiles = { bank: stored.bank_file_name, ledger: stored.ledger_file_name };
+      renderResults(stored.result);
+      await loadRuns();
+    } catch (err) {
+      setStatus("error", err.message || "Could not open that run.");
+    }
+  }
+
+  document.getElementById("add-client").addEventListener("click", async () => {
+    const name = prompt("Client name");
+    if (!name || !name.trim()) return;
+    const body = new FormData();
+    body.append("name", name.trim());
+    const response = await fetch("/clients", { method: "POST", body });
+    if (response.status === 409) {
+      setStatus("error", `A client named "${name.trim()}" already exists.`);
+      return;
+    }
+    if (!response.ok) { setStatus("error", "Could not add that client."); return; }
+    const created = await response.json();
+    await selectClient(created.id);
+  });
+
+  document.getElementById("sb-new-run").addEventListener("click", () => {
+    state.runId = null;
+    state.storedFiles = null;
+    document.getElementById("results-view").style.display = "none";
+    document.getElementById("upload-view").style.display = "flex";
+    loadRuns();
+  });
+
+  state.clientId = localStorage.getItem(CLIENT_KEY);
+  loadClients();
+
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
@@ -1077,6 +1298,10 @@
 
   document.getElementById("download-xlsx").addEventListener("click", () => {
     if (!state.result) return;
+    if (!state.result.report_base64 && state.runId) {
+      window.location = `/runs/${state.runId}/report.xlsx`;
+      return;
+    }
     const bytes = atob(state.result.report_base64);
     const buffer = new Uint8Array(bytes.length);
     for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
@@ -1102,6 +1327,9 @@
     formData.append("ledger_file", state.ledger);
     if (state.bankTemplate) formData.append("bank_pdf_template", state.bankTemplate);
     if (state.ledgerTemplate) formData.append("ledger_pdf_template", state.ledgerTemplate);
+    // Filed against the selected client so it joins their history. Without one the
+    // reconciliation still runs and is shown; it simply is not kept.
+    if (state.clientId) formData.append("client_id", state.clientId);
 
     reconcileBtn.disabled = true;
     setStatus("loading", "Reconciling — this can take a minute…");
@@ -1118,7 +1346,13 @@
       }
       const data = await response.json();
       setStatus("");
+      state.runId = data.saved_run ? data.saved_run.id : null;
+      state.storedFiles = null;
       renderResults(data);
+      // The new run should appear in the sidebar immediately, and the client's run
+      // count with it.
+      if (data.saved_run) loadClients();
+      else if (state.clientId) setStatus("error", "Reconciled, but this run could not be saved to the client's history.");
     } catch (err) {
       setStatus("error", err.message);
     } finally {

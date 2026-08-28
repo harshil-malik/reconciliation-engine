@@ -123,10 +123,14 @@ citation is for.
 
 Roughly in order of value:
 
-- **Persist an `AnomalyConfig` per client.** The config now reaches the API — both
-  reconcile routes take an `anomaly_config` JSON field and `GET /anomaly-config`
-  returns the defaults to edit — but nothing stores it, so an engagement's thresholds
-  have to be re-sent every run.
+- **Store an `AnomalyConfig` against a client.** Clients and run history now exist
+  (`app/store.py`), and the config already reaches the API, so this is a column on
+  `clients` plus a default applied at run time rather than new machinery.
+- **Back up or export a client's history.** The database is the only copy of every
+  reconciliation and every document filed under it, and there is no export beyond
+  downloading one workbook at a time.
+- **Retention.** Documents are kept indefinitely. Someone will eventually want a run,
+  or a whole client, purged on a schedule rather than by hand.
 - **Scanned PDF support** — needs OCR or a hosted vision extractor. Currently
   refused with a clear error, a defensible v1 position.
 - **Stage 3's AI layer** — specced, never built. Rules only. Keep it strictly

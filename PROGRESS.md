@@ -62,7 +62,7 @@ the value.
 
 ## Verified working
 
-- **192 tests**, fully offline (model clients use `httpx.MockTransport`).
+- **201 tests**, fully offline (model clients use `httpx.MockTransport`).
 - **How much AI actually runs, measured** — the HTTP client was instrumented for a
   full run of the real pair: **0 chat-model calls** (0 for PDF extraction, 0 Stage 2
   confirmations) and **2 embedding requests covering 3 texts** — the leftover
@@ -94,6 +94,15 @@ the value.
   citation carries the row's cells with the role ingestion gave each column, and the
   dashboard renders it as the row it is with the money cell marked. The two formats
   now reach the same place by different means.
+- **Clients and saved history** — a CA carries many engagements and comes back weeks
+  later, so runs are filed against a client and kept. A left sidebar lists clients
+  (most recently active first) and that client's past reconciliations; opening one
+  restores the dashboard as it was. The uploaded statement and ledger are stored with
+  the run, so a reconciliation from months ago still supports the same click-through
+  to the highlighted source page. SQLite at `data/reconciliation.db` — **gitignored,
+  and the largest concentration of client financial data in the project.** Deleting a
+  client really deletes its runs and documents; foreign keys are enabled per
+  connection, since SQLite defaults them off and would otherwise orphan both.
 - **Browser dashboard** at `/` backed by `/reconcile/preview`, which returns the
   result as JSON with the workbook embedded as base64 — so downloading cannot re-run
   the pipeline or produce a workbook that differs from the screen.
@@ -239,7 +248,7 @@ cd ~/v-01
 pgrep -fl llama-server                     # both model servers up?
 curl -s localhost:8080/health              # chat  (binds only after weights load)
 curl -s localhost:8081/health              # embeddings
-source .venv/bin/activate && python -m pytest -q          # expect 192 passed
+source .venv/bin/activate && python -m pytest -q          # expect 201 passed
 python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \
                                         sample_data/internal_ledger.pdf
 git log --oneline | head -5

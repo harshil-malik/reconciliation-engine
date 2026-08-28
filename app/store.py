@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
+import logging
 import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Literal, Optional
 
@@ -15,6 +17,8 @@ from typing import Any, Iterator, Literal, Optional
 # gitignored: this file is the single largest concentration of client financial data
 # in the project, holding every reconciliation, the uploaded statements themselves,
 # and the workbooks built from them.
+logger = logging.getLogger(__name__)
+
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "reconciliation.db"
 
 
@@ -26,7 +30,13 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS clients (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    -- This engagement's Stage 3 thresholds, as the JSON an AnomalyConfig serialises
+    -- to. NULL means the defaults. Stored per client because an approval limit is a
+    -- property of the business, not of a run: a client whose limit is 25,00,000 gets
+    -- nothing useful from flags calibrated to 50,000, and re-sending that with every
+    -- upload is how it ends up wrong.
+    anomaly_config TEXT
 );
 
 CREATE TABLE IF NOT EXISTS runs (
@@ -77,10 +87,26 @@ def connect() -> Iterator[sqlite3.Connection]:
     try:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(_SCHEMA)
+        _migrate(connection)
         yield connection
         connection.commit()
     finally:
         connection.close()
+
+
+def _migrate(connection: sqlite3.Connection) -> None:
+    """Add columns to a database created by an earlier version.
+
+    `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so a
+    database written before a column was added would never gain it and every read of
+    that column would fail. Checked rather than attempted-and-caught so a genuine
+    error still surfaces.
+    """
+    existing = {
+        row["name"] for row in connection.execute("PRAGMA table_info(clients)").fetchall()
+    }
+    if "anomaly_config" not in existing:
+        connection.execute("ALTER TABLE clients ADD COLUMN anomaly_config TEXT")
 
 
 def _now() -> str:
@@ -145,9 +171,33 @@ def list_clients() -> list[dict[str, Any]]:
 def get_client(client_id: str) -> Optional[dict[str, Any]]:
     with connect() as connection:
         row = connection.execute(
-            "SELECT id, name, created_at FROM clients WHERE id = ?", (client_id,)
+            "SELECT id, name, created_at, anomaly_config FROM clients WHERE id = ?",
+            (client_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def get_client_anomaly_config(client_id: str) -> Optional[dict[str, Any]]:
+    """This client's stored Stage 3 thresholds, or None for the defaults."""
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT anomaly_config FROM clients WHERE id = ?", (client_id,)
+        ).fetchone()
+    if row is None or row["anomaly_config"] is None:
+        return None
+    return json.loads(row["anomaly_config"])
+
+
+def set_client_anomaly_config(
+    client_id: str, config: Optional[dict[str, Any]]
+) -> bool:
+    """Store or clear this client's thresholds. None restores the defaults."""
+    with connect() as connection:
+        cursor = connection.execute(
+            "UPDATE clients SET anomaly_config = ? WHERE id = ?",
+            (json.dumps(config) if config is not None else None, client_id),
+        )
+        return bool(cursor.rowcount)
 
 
 def rename_client(client_id: str, name: str) -> Optional[dict[str, Any]]:
@@ -322,3 +372,121 @@ def get_run_workbook(run_id: str) -> Optional[tuple[str, bytes]]:
 def delete_run(run_id: str) -> bool:
     with connect() as connection:
         return bool(connection.execute("DELETE FROM runs WHERE id = ?", (run_id,)).rowcount)
+
+
+# -------------------------------------------------------- export and backup
+
+
+def export_client(client_id: str) -> Optional[bytes]:
+    """Everything filed under one client, as a zip a person can read without this app.
+
+    The database is otherwise the only copy of an engagement's history, and a format
+    only this code can open is a poor place to leave a CA's working papers. Each run
+    becomes a folder holding the workbook, the two source documents as uploaded, and
+    the result as JSON, under a manifest naming what is inside.
+    """
+    import zipfile
+
+    client = get_client(client_id)
+    if client is None:
+        return None
+
+    runs = list_runs(client_id)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "client": {k: client[k] for k in ("id", "name", "created_at")},
+                    "exported_at": _now(),
+                    "runs": runs,
+                },
+                indent=2,
+            ),
+        )
+        for run in runs:
+            # Foldered by timestamp so the zip reads chronologically in a file
+            # browser, which is how someone looks for "the July reconciliation".
+            folder = f"{run['created_at'][:19].replace(':', '-')}_{run['id'][:8]}"
+            stored = get_run(run["id"])
+            if stored:
+                archive.writestr(f"{folder}/result.json", json.dumps(stored["result"], indent=2))
+            workbook = get_run_workbook(run["id"])
+            if workbook:
+                archive.writestr(f"{folder}/reconciliation_report.xlsx", workbook[1])
+            for role, (name, content) in get_run_documents(run["id"]).items():
+                archive.writestr(f"{folder}/source/{role}_{name}", content)
+
+    return buffer.getvalue()
+
+
+def backup_database() -> bytes:
+    """A consistent copy of the whole database.
+
+    Taken through SQLite's own backup API rather than by copying the file: a plain
+    copy of a database being written to can be torn, and a backup that restores to a
+    corrupt file is worse than none because nobody finds out until they need it.
+    """
+    import tempfile
+
+    with connect() as source:
+        with tempfile.NamedTemporaryFile(suffix=".db") as handle:
+            destination = sqlite3.connect(handle.name)
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
+            return Path(handle.name).read_bytes()
+
+
+# ---------------------------------------------------------------- retention
+
+
+def purge_documents(older_than_days: int) -> dict[str, int]:
+    """Drop the stored source files of runs older than a window, keeping the runs.
+
+    The graceful half of retention. Documents are almost all of the stored bytes, and
+    dropping them frees that while leaving the reconciliation itself, its figures and
+    its file/page/line citations intact — a purged run loses the highlighted page
+    image, not its audit trail. Deleting whole runs is `delete_run`, and is a
+    different decision.
+    """
+    if older_than_days < 0:
+        raise ValueError("A retention window cannot be negative.")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat(
+        timespec="microseconds"
+    )
+    with connect() as connection:
+        runs = [
+            row["id"]
+            for row in connection.execute(
+                "SELECT id FROM runs WHERE created_at < ?", (cutoff,)
+            ).fetchall()
+        ]
+        if not runs:
+            return {"runs_affected": 0, "documents_removed": 0}
+        placeholders = ",".join("?" for _ in runs)
+        cursor = connection.execute(
+            f"DELETE FROM documents WHERE run_id IN ({placeholders})", runs
+        )
+        removed = cursor.rowcount
+    logger.info(
+        "Retention: removed %d stored document(s) from %d run(s) older than %d day(s)",
+        removed, len(runs), older_than_days,
+    )
+    return {"runs_affected": len(runs), "documents_removed": removed}
+
+
+def run_has_documents(run_id: str) -> bool:
+    """Whether a run still has its source files, or has been purged.
+
+    Worth surfacing: a run whose page highlights simply stopped appearing looks like
+    a bug, where "the documents for this run have been purged" is an explanation.
+    """
+    with connect() as connection:
+        return bool(
+            connection.execute(
+                "SELECT 1 FROM documents WHERE run_id = ? LIMIT 1", (run_id,)
+            ).fetchone()
+        )

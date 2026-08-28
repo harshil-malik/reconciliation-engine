@@ -217,6 +217,83 @@ def remove_client(client_id: str) -> dict:
     return {"deleted": client_id}
 
 
+@app.get("/clients/{client_id}/anomaly-config")
+def client_anomaly_config(client_id: str) -> dict:
+    """This client's Stage 3 thresholds, and whether they are their own or the defaults."""
+    if store.get_client(client_id) is None:
+        raise HTTPException(404, "No such client.")
+    stored = store.get_client_anomaly_config(client_id)
+    return {
+        "is_default": stored is None,
+        "config": (AnomalyConfig(**stored) if stored else AnomalyConfig()).model_dump(mode="json"),
+    }
+
+
+@app.put("/clients/{client_id}/anomaly-config")
+def set_client_anomaly_config(client_id: str, config: str | None = Form(default=None)) -> dict:
+    """Store this engagement's thresholds, or clear them back to the defaults.
+
+    An approval limit is a property of the business, not of a run. Re-sending it with
+    every upload is how it ends up wrong on the one run nobody checked.
+    """
+    if store.get_client(client_id) is None:
+        raise HTTPException(404, "No such client.")
+    parsed = None if config is None or not config.strip() else _parse_anomaly_config(config)
+    store.set_client_anomaly_config(
+        client_id, parsed.model_dump(mode="json") if parsed else None
+    )
+    return client_anomaly_config(client_id)
+
+
+@app.get("/clients/{client_id}/export")
+def export_client(client_id: str) -> StreamingResponse:
+    """Download everything filed under a client as a zip.
+
+    The database is otherwise the only copy of an engagement's history, and a format
+    only this app can open is a poor place to leave a CA's working papers.
+    """
+    archive = store.export_client(client_id)
+    if archive is None:
+        raise HTTPException(404, "No such client.")
+    name = (store.get_client(client_id) or {}).get("name", "client")
+    safe = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in name).strip() or "client"
+    return StreamingResponse(
+        io.BytesIO(archive),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'},
+    )
+
+
+@app.get("/backup")
+def backup() -> StreamingResponse:
+    """A consistent copy of the whole history database.
+
+    Taken through SQLite's backup API, not by copying the file: a plain copy of a
+    database being written to can be torn, and a backup that restores to a corrupt
+    file is worse than none, because nobody finds out until they need it.
+    """
+    return StreamingResponse(
+        io.BytesIO(store.backup_database()),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="reconciliation-backup.db"'},
+    )
+
+
+@app.post("/retention/purge-documents")
+def purge_documents(older_than_days: int = Form(...)) -> dict:
+    """Drop stored source files older than a window, keeping the reconciliations.
+
+    Documents are almost all of the stored bytes. Dropping them frees that while
+    leaving each run's figures and its file/page/line citations intact — a purged run
+    loses its highlighted page image, not its audit trail. Deleting whole runs is a
+    different decision, and is `DELETE /runs/{id}`.
+    """
+    try:
+        return store.purge_documents(older_than_days)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.get("/clients/{client_id}/runs")
 def client_runs(client_id: str) -> dict:
     if store.get_client(client_id) is None:
@@ -239,6 +316,9 @@ def run(run_id: str) -> dict:
     documents = store.get_run_documents(run_id)
     uploads = {name: content for name, content in documents.values()}
     stored["result"]["page_images"] = _page_images_for_result(uploads, stored["result"])
+    # A run whose highlights simply stopped appearing looks like a bug; saying the
+    # documents were purged is an explanation. The citations themselves still stand.
+    stored["documents_available"] = bool(documents)
     return stored
 
 
@@ -294,6 +374,22 @@ def _page_images_for_result(
         if rendered:
             images[name] = {str(page): url for page, url in rendered.items()}
     return images
+
+
+def _resolve_anomaly_config(raw: str | None, client_id: str | None) -> AnomalyConfig:
+    """Thresholds for this run: the request's if it sent any, else the client's.
+
+    A per-request config overrides the stored one rather than merging with it —
+    merging would leave a caller unable to say "just the defaults for this run", and
+    a half-applied threshold set is harder to reason about than either whole one.
+    """
+    if raw is not None and raw.strip():
+        return _parse_anomaly_config(raw)
+    if client_id:
+        stored = store.get_client_anomaly_config(client_id)
+        if stored:
+            return AnomalyConfig(**stored)
+    return AnomalyConfig()
 
 
 def _parse_anomaly_config(raw: str | None) -> AnomalyConfig:
@@ -610,11 +706,20 @@ async def reconcile(
     bank_pdf_template: str | None = Form(default=None),
     ledger_pdf_template: str | None = Form(default=None),
     anomaly_config: str | None = Form(default=None),
+    client_id: str | None = Form(default=None),
     vision_extractor: VisionExtractor = Depends(get_vision_extractor),
     embedding_client: EmbeddingClient = Depends(get_embedding_client),
     confirmer: MatchConfirmer = Depends(get_match_confirmer),
 ) -> StreamingResponse:
-    """Run the pipeline and return the audit-ready report as a downloadable .xlsx."""
+    """Run the pipeline and return the audit-ready report as a downloadable .xlsx.
+
+    `client_id` is read for that client's anomaly thresholds only — this route does
+    not file the run, because filing stores the dashboard payload and this route never
+    builds one. Use `/reconcile/preview` to add a run to a client's history. The
+    thresholds are honoured here regardless: a client whose approval limit is not the
+    default getting default flags, silently, from one route and not the other is
+    exactly the kind of quiet wrong answer this engine exists to avoid.
+    """
     _, _, _, report_bytes, _ = await _run_reconciliation(
         bank_file=bank_file,
         ledger_file=ledger_file,
@@ -623,7 +728,7 @@ async def reconcile(
         vision_extractor=vision_extractor,
         embedding_client=embedding_client,
         confirmer=confirmer,
-        anomaly_config=_parse_anomaly_config(anomaly_config),
+        anomaly_config=_resolve_anomaly_config(anomaly_config, client_id),
     )
 
     return StreamingResponse(
@@ -678,7 +783,7 @@ async def reconcile_preview(
         vision_extractor=vision_extractor,
         embedding_client=embedding_client,
         confirmer=confirmer,
-        anomaly_config=_parse_anomaly_config(anomaly_config),
+        anomaly_config=_resolve_anomaly_config(anomaly_config, client_id),
     )
 
     matched = match_result.matched

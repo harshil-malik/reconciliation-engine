@@ -153,3 +153,127 @@ def test_renaming_a_client_keeps_its_history() -> None:
     assert renamed.status_code == 200
     assert renamed.json()["name"] == "New Name Ltd"
     assert len(client.get(f"/clients/{created['id']}/runs").json()["runs"]) == 1
+
+
+def test_client_thresholds_apply_to_that_clients_runs() -> None:
+    """An approval limit is a property of the business, not of a run. Re-sending it
+    with every upload is how it ends up wrong on the one run nobody checked."""
+    created = client.post("/clients", data={"name": "Apex Ltd"}).json()
+
+    # 15,075 sits under nobody's default threshold.
+    before = _reconcile(created["id"]).json()
+    assert not [f for f in before["anomalies"] if f["rule"] == "just_below_approval_threshold"]
+
+    body = {"config": json.dumps({"approval_thresholds": ["16000"], "threshold_margin_pct": "0.10"})}
+    assert client.put(f"/clients/{created['id']}/anomaly-config", data=body).status_code == 200
+
+    after = _reconcile(created["id"]).json()
+    assert [f for f in after["anomalies"] if f["rule"] == "just_below_approval_threshold"]
+
+
+def test_a_request_config_overrides_the_clients_stored_one() -> None:
+    """Overriding rather than merging: merging would leave a caller unable to ask for
+    plain defaults on one run, and a half-applied threshold set is harder to reason
+    about than either whole one."""
+    created = client.post("/clients", data={"name": "Override Co"}).json()
+    client.put(
+        f"/clients/{created['id']}/anomaly-config",
+        data={"config": json.dumps({"approval_thresholds": ["16000"], "threshold_margin_pct": "0.10"})},
+    )
+
+    response = client.post(
+        "/reconcile/preview",
+        files={
+            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
+            "ledger_file": ("ledger.csv", _LEDGER_CSV, "text/csv"),
+        },
+        data={"client_id": created["id"], "anomaly_config": json.dumps({"approval_thresholds": []})},
+    )
+    flags = [f for f in response.json()["anomalies"] if f["rule"] == "just_below_approval_threshold"]
+    assert flags == []
+
+
+def test_thresholds_can_be_cleared_back_to_the_defaults() -> None:
+    created = client.post("/clients", data={"name": "Reset Co"}).json()
+    client.put(
+        f"/clients/{created['id']}/anomaly-config",
+        data={"config": json.dumps({"approval_thresholds": ["16000"]})},
+    )
+    assert client.get(f"/clients/{created['id']}/anomaly-config").json()["is_default"] is False
+
+    client.put(f"/clients/{created['id']}/anomaly-config", data={})
+    assert client.get(f"/clients/{created['id']}/anomaly-config").json()["is_default"] is True
+
+
+def test_export_contains_every_run_with_its_workbook_and_sources() -> None:
+    """The database is otherwise the only copy of an engagement's history, and a
+    format only this app can open is a poor place to leave a CA's working papers."""
+    import zipfile
+
+    created = client.post("/clients", data={"name": "Export Co"}).json()
+    _reconcile(created["id"])
+
+    response = client.get(f"/clients/{created['id']}/export")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = archive.namelist()
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["client"]["name"] == "Export Co"
+        assert len(manifest["runs"]) == 1
+        assert any(n.endswith("reconciliation_report.xlsx") for n in names), names
+        assert any("/source/bank_bank.csv" in n for n in names), names
+        assert any("/source/ledger_ledger.csv" in n for n in names), names
+        assert any(n.endswith("result.json") for n in names), names
+
+
+def test_backup_restores_to_a_readable_database(tmp_path) -> None:
+    """A plain file copy of a database being written to can be torn, and a backup
+    that restores to a corrupt file is worse than none because nobody finds out
+    until they need it."""
+    created = client.post("/clients", data={"name": "Backup Co"}).json()
+    _reconcile(created["id"])
+
+    response = client.get("/backup")
+    assert response.status_code == 200
+
+    restored = tmp_path / "restored.db"
+    restored.write_bytes(response.content)
+
+    import sqlite3
+    connection = sqlite3.connect(restored)
+    try:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        names = [r[0] for r in connection.execute("SELECT name FROM clients")]
+        assert "Backup Co" in names
+        assert connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+    finally:
+        connection.close()
+
+
+def test_purging_documents_keeps_the_reconciliation_and_its_citations() -> None:
+    """The graceful half of retention. Documents are almost all of the stored bytes;
+    dropping them frees that while leaving each run's figures and its file/page/line
+    citations intact. A purged run loses its page image, not its audit trail."""
+    created = client.post("/clients", data={"name": "Retention Co"}).json()
+    run_id = _reconcile(created["id"]).json()["saved_run"]["id"]
+
+    # Nothing is old enough yet, so a 30-day window must not touch it.
+    assert store.purge_documents(30) == {"runs_affected": 0, "documents_removed": 0}
+    assert client.get(f"/runs/{run_id}").json()["documents_available"] is True
+
+    purged = client.post("/retention/purge-documents", data={"older_than_days": 0})
+    assert purged.status_code == 200
+    assert purged.json()["documents_removed"] == 2
+
+    reopened = client.get(f"/runs/{run_id}").json()
+    assert reopened["documents_available"] is False
+    assert reopened["result"]["page_images"] == {}
+    # The run itself, and every citation on it, survives.
+    rows = [p["bank"] for p in reopened["result"]["matched"]]
+    assert rows and all(r["source_ref"]["text"] for r in rows)
+
+
+def test_a_negative_retention_window_is_rejected() -> None:
+    assert client.post("/retention/purge-documents", data={"older_than_days": -1}).status_code == 422

@@ -62,7 +62,7 @@ the value.
 
 ## Verified working
 
-- **201 tests**, fully offline (model clients use `httpx.MockTransport`).
+- **208 tests**, fully offline (model clients use `httpx.MockTransport`).
 - **How much AI actually runs, measured** — the HTTP client was instrumented for a
   full run of the real pair: **0 chat-model calls** (0 for PDF extraction, 0 Stage 2
   confirmations) and **2 embedding requests covering 3 texts** — the leftover
@@ -103,6 +103,13 @@ the value.
   and the largest concentration of client financial data in the project.** Deleting a
   client really deletes its runs and documents; foreign keys are enabled per
   connection, since SQLite defaults them off and would otherwise orphan both.
+- **Per-client anomaly thresholds, export, and retention** — thresholds are stored
+  against the client (an approval limit is a property of the business, not of a run)
+  and applied by both reconcile routes; a config sent with a request overrides them
+  for that run. `GET /clients/{id}/export` produces a zip of every run with its
+  workbook, result and source documents; `GET /backup` takes a consistent copy of the
+  database through SQLite's own backup API. `POST /retention/purge-documents` drops
+  stored sources older than a window while keeping the runs and their citations.
 - **Browser dashboard** at `/` backed by `/reconcile/preview`, which returns the
   result as JSON with the workbook embedded as base64 — so downloading cannot re-run
   the pipeline or produce a workbook that differs from the screen.
@@ -236,10 +243,10 @@ one row in sixteen, and there is no labelled training data.
 - **Stage 3's AI layer** was specced but never built (rules only).
 - **No auth or rate limiting.** Fine locally; not for anyone else. (An upload size
   cap now exists.)
-- **Anomaly thresholds are per request, not per client.** `/reconcile` and
-  `/reconcile/preview` accept an `anomaly_config` JSON field and `GET /anomaly-config`
-  returns the defaults to edit, but nothing stores a config against a client, so the
-  same engagement's settings must be sent each run.
+- **Retention is manual.** The purge endpoint exists and is tested, but nothing calls
+  it on a schedule.
+- **The thresholds editor is raw JSON.** Honest — it is exactly what the API applies —
+  but not something to put in front of a CA.
 
 ## Check current state
 
@@ -248,7 +255,7 @@ cd ~/v-01
 pgrep -fl llama-server                     # both model servers up?
 curl -s localhost:8080/health              # chat  (binds only after weights load)
 curl -s localhost:8081/health              # embeddings
-source .venv/bin/activate && python -m pytest -q          # expect 201 passed
+source .venv/bin/activate && python -m pytest -q          # expect 208 passed
 python scripts/verify_reconciliation.py sample_data/bank_statement.pdf \
                                         sample_data/internal_ledger.pdf
 git log --oneline | head -5

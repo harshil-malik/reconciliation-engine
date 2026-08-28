@@ -117,6 +117,23 @@
   .sb-runs { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
   .sb-empty { font-size: 11.5px; color: var(--text-muted); padding: 8px 2px; line-height: 1.5; }
 
+  .sb-tools { display: flex; gap: 6px; margin-top: 10px; }
+  .sb-tool {
+    flex: 1; padding: 5px 6px; font-size: 11px; border-radius: 5px;
+    border: 1px solid var(--border); background: none; color: var(--text-muted);
+  }
+  .sb-tool:hover { background: rgba(127,127,127,0.10); color: var(--text); }
+  .sb-tool[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+  .threshold-editor { margin-top: 8px; }
+  .threshold-editor textarea {
+    width: 100%; min-height: 132px; font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px; line-height: 1.45; padding: 7px; border-radius: 5px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    resize: vertical;
+  }
+  .threshold-note { font-size: 10.5px; color: var(--text-muted); margin: 5px 0; line-height: 1.45; }
+
   .sb-foot { padding: 12px 16px; border-top: 1px solid var(--border); }
   .sb-new {
     width: 100%; padding: 8px; font-size: 12.5px; border-radius: 6px;
@@ -575,6 +592,22 @@
     <ul class="client-list" id="client-list"></ul>
   </div>
 
+  <div class="sb-section" style="padding-top:8px;">
+    <div class="sb-tools">
+      <button class="sb-tool" id="client-thresholds" disabled>Thresholds</button>
+      <button class="sb-tool" id="client-export" disabled>Export</button>
+    </div>
+    <details class="threshold-editor" id="threshold-panel" style="display:none;">
+      <summary style="display:none;"></summary>
+      <div class="threshold-note" id="threshold-state"></div>
+      <textarea id="threshold-json" spellcheck="false"></textarea>
+      <div class="sb-tools">
+        <button class="sb-tool" id="threshold-save">Save</button>
+        <button class="sb-tool" id="threshold-reset">Use defaults</button>
+      </div>
+    </details>
+  </div>
+
   <div class="sb-section" style="padding-bottom:4px;">
     <div class="sb-label">History</div>
   </div>
@@ -705,7 +738,7 @@
     // Which client this work is filed under, which stored run is on screen, and the
     // filenames of that run — a run reopened from history has no File objects behind
     // it, so its header cannot read them off the upload boxes.
-    clientId: null, runId: null, storedFiles: null,
+    clientId: null, runId: null, storedFiles: null, documentsPurged: false,
   };
 
   const bankZone = document.getElementById("bank-zone");
@@ -955,6 +988,9 @@
         : `<div class="source-missing">${escapeHtml(ref.label)}</div>`;
     // Where the two disagree the reviewer must be told which figure the
     // reconciliation used, or the highlighted cell looks like a contradiction.
+    const purged = state.documentsPurged
+      ? `<div class="source-missing">The source documents for this run have been purged, so there is no page to show. The citation above still names the line it was read from.</div>`
+      : "";
     const corrected = (txn.printed_amount !== null && txn.printed_amount !== undefined)
       ? `<div class="amount-corrected">This row prints <b>${fmtAmount(txn.printed_amount)}</b>,
            but its running balance moves by <b>${fmtAmount(txn.amount)}</b>, which is the
@@ -966,6 +1002,7 @@
       ${body}
       ${corrected}
       ${pageImage(txn)}
+      ${(ref.kind === "pdf_line" && !pageImage(txn)) ? purged : ""}
     </div>`;
   }
 
@@ -1205,6 +1242,9 @@
 
     const client = currentClient();
     document.getElementById("sb-context").textContent = client ? client.name : "No client selected";
+    document.getElementById("client-thresholds").disabled = !client;
+    document.getElementById("client-export").disabled = !client;
+    document.getElementById("threshold-panel").style.display = "none";
     await loadRuns();
   }
 
@@ -1254,6 +1294,7 @@
       // A stored run has no File objects behind it, so the header reads its filenames
       // from the record rather than from whatever is sitting in the upload boxes.
       state.storedFiles = { bank: stored.bank_file_name, ledger: stored.ledger_file_name };
+      state.documentsPurged = stored.documents_available === false;
       renderResults(stored.result);
       await loadRuns();
     } catch (err) {
@@ -1274,6 +1315,58 @@
     if (!response.ok) { setStatus("error", "Could not add that client."); return; }
     const created = await response.json();
     await selectClient(created.id);
+  });
+
+  // Stage 3's thresholds belong to the engagement, not the run: an approval limit is
+  // a property of the business. Editing the raw config is deliberate — it is the same
+  // shape the API takes, so what is on screen is exactly what will be applied.
+  const thresholdPanel = document.getElementById("threshold-panel");
+
+  document.getElementById("client-thresholds").addEventListener("click", async () => {
+    if (!state.clientId) return;
+    if (thresholdPanel.style.display === "block") { thresholdPanel.style.display = "none"; return; }
+    try {
+      const data = await (await fetch(`/clients/${state.clientId}/anomaly-config`)).json();
+      document.getElementById("threshold-json").value = JSON.stringify(data.config, null, 2);
+      document.getElementById("threshold-state").textContent = data.is_default
+        ? "Using the defaults. Saving stores these against this client, and every run for them uses them."
+        : "This client has its own thresholds.";
+      thresholdPanel.style.display = "block";
+      thresholdPanel.open = true;
+    } catch { setStatus("error", "Could not load this client's thresholds."); }
+  });
+
+  document.getElementById("threshold-save").addEventListener("click", async () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(document.getElementById("threshold-json").value);
+    } catch {
+      setStatus("error", "That is not valid JSON, so nothing was saved.");
+      return;
+    }
+    const body = new FormData();
+    body.append("config", JSON.stringify(parsed));
+    const response = await fetch(`/clients/${state.clientId}/anomaly-config`, { method: "PUT", body });
+    if (!response.ok) {
+      let message = "Could not save those thresholds.";
+      try { const d = await response.json(); if (d.detail) message = d.detail; } catch (_) {}
+      setStatus("error", message);
+      return;
+    }
+    document.getElementById("threshold-state").textContent = "Saved. Every run for this client uses these.";
+    setStatus("", "");
+  });
+
+  document.getElementById("threshold-reset").addEventListener("click", async () => {
+    await fetch(`/clients/${state.clientId}/anomaly-config`, { method: "PUT", body: new FormData() });
+    const data = await (await fetch(`/clients/${state.clientId}/anomaly-config`)).json();
+    document.getElementById("threshold-json").value = JSON.stringify(data.config, null, 2);
+    document.getElementById("threshold-state").textContent = "Back to the defaults.";
+  });
+
+  // The database is otherwise the only copy of an engagement's history.
+  document.getElementById("client-export").addEventListener("click", () => {
+    if (state.clientId) window.location = `/clients/${state.clientId}/export`;
   });
 
   document.getElementById("sb-new-run").addEventListener("click", () => {

@@ -203,9 +203,20 @@ with the run and the cited pages are rendered again from them.
 | `GET /runs/{id}` | Reopen a stored run. |
 | `GET /runs/{id}/report.xlsx` | The workbook as it was built that day. |
 
+| `GET/PUT /clients/{id}/anomaly-config` | This engagement's Stage 3 thresholds. An approval limit is a property of the business, not of a run, so it is stored once and applied to every run for that client. A config sent with a request overrides it for that run. |
+| `GET /clients/{id}/export` | Everything filed under a client as a zip: a manifest, and per run the workbook, the result JSON and both source documents as uploaded. |
+| `GET /backup` | A consistent copy of the whole database, taken through SQLite's backup API rather than by copying the file — a copy of a database being written to can be torn. |
+| `POST /retention/purge-documents` | Drop stored source files older than a window, keeping the runs. |
+
 Pass `client_id` to `/reconcile/preview` to file a run. Without it the reconciliation
 still runs and is shown — it simply is not kept, because putting filing in front of
 the work would be the wrong way round.
+
+Retention has two levers, deliberately separate. Purging *documents* frees almost
+all of the stored bytes while leaving each run's figures and its file/page/line
+citations intact — a purged run loses its highlighted page image, not its audit
+trail, and says so on screen rather than looking broken. Deleting a run or a client
+is a different decision and removes everything.
 
 Everything lives in **`data/reconciliation.db`**, a gitignored SQLite file. It holds
 every reconciliation, the client documents themselves, and the workbooks built from
@@ -311,7 +322,7 @@ key in `.env`.
 source .venv/bin/activate && python -m pytest
 ```
 
-201 tests, fully offline — model clients run against an in-memory HTTP transport, so
+208 tests, fully offline — model clients run against an in-memory HTTP transport, so
 no llama.cpp server or API key is needed.
 
 Each test's docstring names the bug it exists for. Several encode failures found on

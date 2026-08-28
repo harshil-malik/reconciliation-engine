@@ -123,14 +123,14 @@ citation is for.
 
 Roughly in order of value:
 
-- **Store an `AnomalyConfig` against a client.** Clients and run history now exist
-  (`app/store.py`), and the config already reaches the API, so this is a column on
-  `clients` plus a default applied at run time rather than new machinery.
-- **Back up or export a client's history.** The database is the only copy of every
-  reconciliation and every document filed under it, and there is no export beyond
-  downloading one workbook at a time.
-- **Retention.** Documents are kept indefinitely. Someone will eventually want a run,
-  or a whole client, purged on a schedule rather than by hand.
+- **Run the retention purge on a schedule.** `POST /retention/purge-documents` exists
+  and is tested, but nothing calls it — today it is a button someone has to remember
+  to press. A cron entry or a startup task with a configured window would make it a
+  policy rather than a chore.
+- **A real thresholds editor.** The sidebar edits the raw `AnomalyConfig` JSON, which
+  is honest — it is exactly what the API applies — but it is not something to put in
+  front of a CA. Fields with labels and units, and a preview of how many flags the
+  change would raise or silence on this client's last run.
 - **Scanned PDF support** — needs OCR or a hosted vision extractor. Currently
   refused with a clear error, a defensible v1 position.
 - **Stage 3's AI layer** — specced, never built. Rules only. Keep it strictly

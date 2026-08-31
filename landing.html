@@ -1,0 +1,1210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Munim AI — Reconciliation Copilot for Chartered Accountants</title>
+<meta name="description" content="Munim AI is a copilot for chartered accountants, not a replacement. It handles bank reconciliation's manual grunt work — matching, anomaly-flagging, reporting — offline and on your machine, so you can spend your time on the judgment calls you actually trained for." />
+<meta name="theme-color" content="#161826" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%23161826'/%3E%3Cg fill='%236C9C50'%3E%3Ccircle cx='19' cy='5' r='2.15'/%3E%3Ccircle cx='5' cy='12' r='2.15'/%3E%3Ccircle cx='12' cy='19' r='2.15'/%3E%3C/g%3E%3Cg fill='%235D6480'%3E%3Ccircle cx='5' cy='5' r='1.27'/%3E%3Ccircle cx='12' cy='5' r='1.27'/%3E%3Ccircle cx='12' cy='12' r='1.27'/%3E%3Ccircle cx='5' cy='19' r='1.27'/%3E%3Ccircle cx='19' cy='19' r='1.27'/%3E%3C/g%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* brand greens */
+  --g-900:#2C421E;
+  --g-800:#3A5828;
+  --g-600:#6C9C50;
+  --g-400:#85BB65;
+  --g-200:#B5DD9B;
+  --green:#3A5828;
+  --green-tint:#E9F1E1;
+  /* neutrals, tuned to the brand ground #161826 */
+  --paper:#F5F6FA;
+  --paper-2:#EBEDF5;
+  --line:#E1E4EF;
+  --line-2:#CDD2E2;
+  --ink:#161826;
+  --ink-2:#4E5468;
+  --ink-3:#868DA2;
+  --dark:#161826;
+  --dark-2:#1E2132;
+  --dark-line:#2E3245;
+  --dark-ink:#EDEFF7;
+  --dark-ink-2:#9AA1B8;
+  --dot-mute:#BFC4D6;
+  --rust:#8C4A1E;
+  --r:10px;
+  --r-lg:20px;
+  --t:200ms cubic-bezier(.2,.6,.3,1);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;scroll-padding-top:110px;}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Inter",-apple-system,"Segoe UI",sans-serif;
+  font-size:16px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto;}
+  *,*::before,*::after{transition:none !important;animation:none !important;}
+  .rv{opacity:1 !important;transform:none !important;}
+}
+.js .rv{opacity:0;transform:translateY(14px);transition:opacity 620ms cubic-bezier(.2,.6,.3,1),transform 620ms cubic-bezier(.2,.6,.3,1);}
+.js .rv.in{opacity:1;transform:none;}
+:is(a,button,summary,[tabindex]):focus-visible{
+  outline:2px solid var(--g-600);outline-offset:3px;border-radius:3px;
+}
+a{color:inherit;}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;}
+.serif{font-family:"Newsreader",Georgia,serif;font-weight:400;letter-spacing:-.01em;}
+.wrap{max-width:1180px;margin:0 auto;padding:0 clamp(1.25rem,4vw,2.5rem);}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+
+/* ---------- TICKER ---------- */
+.ticker{
+  background:var(--dark);color:var(--dark-ink);
+  font-size:.8rem;line-height:1;padding:.72rem 0;overflow:hidden;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);
+}
+.tk-track{display:flex;width:max-content;animation:marquee 46s linear infinite;}
+.ticker:hover .tk-track{animation-play-state:paused;}
+.tk-set{display:flex;align-items:center;flex:none;}
+.tk-item{display:inline-flex;align-items:center;gap:.55rem;padding:0 1.7rem;white-space:nowrap;color:var(--dark-ink-2);}
+.tk-item b{font-weight:600;color:var(--dark-ink);}
+.tk-sep{width:5px;height:5px;border-radius:50%;background:var(--g-600);flex:none;}
+@keyframes marquee{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+@media (prefers-reduced-motion:reduce){ .tk-track{animation:none;} }
+@media (max-width:720px){ .ticker{font-size:.74rem;} }
+
+/* ---------- NAV ---------- */
+header{
+  position:sticky;top:0;z-index:50;overflow:visible;
+  background:transparent;
+  transition:background-color 260ms ease;
+}
+header::after{
+  content:"";position:absolute;left:0;right:0;bottom:0;height:1px;
+  background:var(--line);opacity:0;transition:opacity 260ms ease;
+}
+header.stuck{
+  background:rgba(245,246,250,.88);
+  backdrop-filter:saturate(160%) blur(14px);
+  -webkit-backdrop-filter:saturate(160%) blur(14px);
+}
+header.stuck::after{opacity:1;}
+.nav{display:flex;align-items:center;justify-content:space-between;height:74px;gap:1.5rem;}
+.brand{display:inline-flex;align-items:center;gap:.65rem;text-decoration:none;line-height:1;}
+.mark{width:26px;height:26px;flex:none;}
+.mark .d-lg{fill:var(--g-800);}
+.mark .d-sm{fill:var(--dot-mute);}
+.mark circle{transform-box:fill-box;transform-origin:center;transition:transform 320ms cubic-bezier(.34,1.4,.5,1),fill 260ms ease;}
+.brand:hover .mark .d-sm{transform:scale(1.45);fill:var(--g-400);}
+.brand:hover .mark .d-lg{transform:scale(.82);}
+.wm{
+  font-family:"Inter",sans-serif;font-weight:600;font-size:.95rem;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--ink);
+}
+.wm b{font-weight:600;color:var(--g-600);}
+.navlinks{display:flex;gap:.5rem;align-items:center;}
+
+/* ---------- TAB NAV (flat tabs, dropdowns underneath) ---------- */
+.menubar{display:flex;align-items:stretch;gap:clamp(1rem,2.4vw,2rem);height:74px;}
+.mb-item{position:relative;display:flex;}
+.mb-trigger{
+  appearance:none;background:none;border:0;cursor:pointer;font-family:inherit;
+  display:inline-flex;align-items:center;gap:.32rem;padding:0;
+  color:var(--ink);font-size:.95rem;font-weight:450;letter-spacing:-.005em;
+  position:relative;transition:color var(--t);
+}
+/* the marker sits on the bar's bottom edge, like the reference */
+.mb-trigger::after{
+  content:"";position:absolute;left:0;right:0;bottom:0;height:2.5px;border-radius:2px;
+  background:var(--ink);transform:scaleX(0);transform-origin:center;
+  transition:transform 260ms cubic-bezier(.2,.6,.3,1),background-color var(--t);
+}
+.mb-trigger:hover{color:var(--ink-2);}
+.mb-trigger:hover::after{transform:scaleX(1);background:var(--line-2);}
+.mb-item.open .mb-trigger{color:var(--ink);}
+.mb-item.open .mb-trigger::after,.mb-trigger.active::after{transform:scaleX(1);background:var(--ink);}
+.mb-chev{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;
+  opacity:.5;transition:transform 240ms cubic-bezier(.2,.6,.3,1),opacity var(--t);}
+.mb-trigger:hover .mb-chev{opacity:.8;}
+.mb-item.open .mb-chev{transform:rotate(180deg);opacity:.8;}
+
+.mb-menu{
+  position:absolute;top:100%;left:-.7rem;z-index:60;
+  min-width:290px;padding:.4rem;
+  background:var(--paper);border:1px solid var(--line-2);border-radius:14px;
+  box-shadow:0 18px 44px -16px rgba(22,24,38,.24),0 2px 6px rgba(22,24,38,.05);
+  opacity:0;visibility:hidden;transform:translateY(-6px);
+  transition:opacity 180ms ease,transform 200ms cubic-bezier(.2,.6,.3,1),visibility 0s linear 180ms;
+}
+.mb-item.open .mb-menu{
+  opacity:1;visibility:visible;transform:none;
+  transition:opacity 180ms ease,transform 200ms cubic-bezier(.2,.6,.3,1),visibility 0s;
+}
+.mb-menu.align-right{left:auto;right:-.7rem;}
+.mb-link{
+  display:flex;gap:.75rem;align-items:flex-start;text-decoration:none;
+  padding:.65rem .7rem;border-radius:10px;transition:background-color 160ms ease;
+}
+.mb-link:hover,.mb-link:focus-visible{background:var(--paper-2);}
+.mb-link svg.mb-ico{
+  width:17px;height:17px;flex:none;margin-top:.12rem;
+  stroke:var(--ink-3);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;
+  transition:stroke 160ms ease;
+}
+.mb-link:hover svg.mb-ico{stroke:var(--g-800);}
+.mb-link b{display:block;font-size:.88rem;font-weight:550;color:var(--ink);letter-spacing:-.01em;}
+.mb-link i{display:block;font-style:normal;font-size:.79rem;color:var(--ink-3);margin-top:.1rem;line-height:1.4;}
+.mb-sep{height:1px;background:var(--line);margin:.35rem .7rem;}
+
+.mb-burger{
+  appearance:none;background:none;cursor:pointer;font-family:inherit;
+  display:none;align-items:center;gap:.45rem;
+  border:1px solid var(--line-2);border-radius:8px;
+  padding:.5rem .8rem;font-size:.86rem;font-weight:500;color:var(--ink-2);
+  transition:border-color var(--t),color var(--t);
+}
+.mb-burger:hover{border-color:var(--ink);color:var(--ink);}
+.mb-burger svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;}
+.mb-sheet{
+  display:none;position:absolute;top:100%;left:0;right:0;z-index:55;
+  background:var(--paper);border-top:1px solid var(--line);
+  box-shadow:0 18px 40px -18px rgba(22,24,38,.28);
+  padding:.6rem clamp(1.25rem,4vw,2.5rem) 1.2rem;
+}
+.mb-sheet.open{display:block;}
+.mb-sheet h6{
+  font-family:"JetBrains Mono",monospace;font-size:.64rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--g-800);font-weight:500;margin:.9rem 0 .2rem;
+}
+.mb-sheet a{
+  display:block;text-decoration:none;color:var(--ink-2);
+  font-size:.95rem;padding:.55rem 0;border-bottom:1px solid var(--line);
+}
+.mb-sheet a:hover{color:var(--g-800);}
+
+@media (max-width:900px){
+  .menubar{display:none;}
+  .mb-burger{display:inline-flex;}
+}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:.55rem;cursor:pointer;
+  min-height:46px;padding:.75rem 1.35rem;border-radius:8px;
+  font-family:inherit;font-size:.925rem;font-weight:550;text-decoration:none;
+  border:1px solid transparent;white-space:nowrap;
+  transition:background-color var(--t),color var(--t),border-color var(--t),transform var(--t);
+}
+.btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none;}
+.btn-primary{background:var(--g-800);color:#fff;}
+.btn-primary:hover{background:var(--g-900);}
+.btn-ghost{background:transparent;color:var(--ink);border-color:var(--line-2);}
+.btn-ghost:hover{border-color:var(--g-800);color:var(--g-800);background:var(--paper-2);}
+.btn-on-dark{background:transparent;color:var(--dark-ink);border-color:rgba(242,240,235,.28);}
+.btn-on-dark:hover{background:rgba(237,239,247,.1);border-color:rgba(237,239,247,.5);}
+.btn-green{background:var(--g-600);color:#0F1220;}
+.btn-green:hover{background:var(--g-400);}
+.nav-cta{min-height:40px;padding:.5rem 1.05rem;font-size:.88rem;color:#fff;background:var(--g-800);}
+.nav-cta:hover{color:#fff;background:var(--g-900);}
+@media (max-width:420px){ .nav-cta{display:none;} }
+
+/* ---------- TYPE SCALE ---------- */
+h1{
+  font-family:"Newsreader",Georgia,serif;font-weight:400;
+  font-size:clamp(2.6rem,6.4vw,5rem);line-height:1.03;letter-spacing:-.025em;
+  max-width:17ch;text-wrap:balance;
+}
+h2{
+  font-family:"Newsreader",Georgia,serif;font-weight:400;
+  font-size:clamp(1.9rem,3.9vw,3rem);line-height:1.1;letter-spacing:-.02em;
+  max-width:22ch;text-wrap:balance;
+}
+h3{
+  font-family:"Newsreader",Georgia,serif;font-weight:400;
+  font-size:clamp(1.35rem,2.2vw,1.75rem);line-height:1.18;letter-spacing:-.015em;
+}
+h4{font-size:1.02rem;font-weight:600;letter-spacing:-.01em;}
+.eyebrow{
+  font-family:"JetBrains Mono",monospace;font-size:.7rem;font-weight:500;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--g-800);
+}
+.dek{font-size:clamp(1.05rem,1.5vw,1.2rem);color:var(--ink-2);max-width:52ch;line-height:1.5;}
+.sub{font-size:1.02rem;color:var(--ink-2);max-width:60ch;}
+code{
+  font-family:"JetBrains Mono",monospace;font-size:.86em;
+  background:var(--paper-2);border:1px solid var(--line);
+  padding:.08em .38em;border-radius:4px;
+}
+
+/* ---------- SECTION FRAME ---------- */
+section{padding:clamp(4rem,8vw,7rem) 0;border-top:1px solid var(--line);}
+.sec-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:2rem 4rem;align-items:end;margin-bottom:clamp(2.5rem,5vw,4rem);}
+@media (max-width:860px){ .sec-head{grid-template-columns:1fr;align-items:start;} }
+.sec-head .eyebrow{margin-bottom:1rem;display:block;}
+
+
+/* hero backdrop: soft brand-green wash + a dot grid echoing the logo mark,
+   both masked so they fade out before the stack strip */
+.hero{position:relative;isolation:isolate;}
+.hero::before{
+  content:"";position:absolute;inset:-90px 0 0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(920px 540px at 76% 2%, rgba(108,156,80,.24), transparent 62%),
+    radial-gradient(760px 460px at 6% 0%, rgba(58,88,40,.10), transparent 62%);
+}
+.hero::after{
+  content:"";position:absolute;inset:-90px 0 0;z-index:-1;pointer-events:none;
+  background-image:radial-gradient(rgba(58,88,40,.20) 1px, transparent 1px);
+  background-size:22px 22px;
+  -webkit-mask-image:linear-gradient(180deg,#000 0%,#000 36%,transparent 78%);
+  mask-image:linear-gradient(180deg,#000 0%,#000 36%,transparent 78%);
+}
+
+/* ---------- HERO ---------- */
+.hero{padding:clamp(4rem,9vw,7.5rem) 0 0;}
+.pill{
+  display:inline-flex;align-items:center;gap:.5rem;
+  border:1px solid var(--line-2);border-radius:100px;
+  padding:.34rem .85rem;font-size:.78rem;font-weight:500;color:var(--ink-2);
+  background:var(--paper);margin-bottom:1.9rem;
+}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--g-600);flex:none;}
+.hero h1{margin-bottom:1.6rem;}
+.hero .dek{margin-bottom:2.4rem;}
+.cta-row{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;}
+.cta-note{font-size:.86rem;color:var(--ink-3);}
+
+/* ---------- DARK PRODUCT PANEL ---------- */
+.showcase{margin-top:clamp(3rem,6vw,5rem);}
+.panel-dark{
+  background:var(--dark);border-radius:var(--r-lg);
+  padding:clamp(1.6rem,3.5vw,2.75rem);
+  color:var(--dark-ink);overflow:hidden;
+}
+.panel-dark .eyebrow{color:var(--g-400);}
+.panel-dark h3{color:var(--dark-ink);}
+.panel-dark p{color:var(--dark-ink-2);}
+.panel-head{display:flex;justify-content:space-between;align-items:flex-end;gap:2rem;flex-wrap:wrap;margin-bottom:1.9rem;}
+.panel-head .lede{max-width:60ch;}
+.panel-head h3{margin:.65rem 0 .55rem;}
+
+/* app mock */
+.app{
+  background:#fff;border-radius:12px;overflow:hidden;
+  box-shadow:0 24px 60px -20px rgba(0,0,0,.55);
+  color:var(--ink);
+}
+.app-bar{
+  display:flex;align-items:center;gap:.6rem;
+  padding:.7rem 1rem;border-bottom:1px solid var(--line);background:var(--paper);
+}
+.app-bar .tl{display:flex;gap:.35rem;}
+.app-bar .tl i{width:9px;height:9px;border-radius:50%;background:var(--line-2);display:block;}
+.app-bar .ttl{font-size:.8rem;font-weight:550;color:var(--ink-2);margin-left:.35rem;}
+.app-bar .badge-ok{
+  margin-left:auto;font-size:.68rem;font-weight:600;letter-spacing:.04em;
+  color:var(--g-800);background:var(--green-tint);border-radius:100px;padding:.2rem .6rem;
+  display:inline-flex;align-items:center;gap:.35rem;
+}
+.app-tabs{display:flex;gap:0;border-bottom:1px solid var(--line);overflow-x:auto;}
+.app-tabs span{
+  font-size:.8rem;font-weight:500;color:var(--ink-3);
+  padding:.75rem 1rem;white-space:nowrap;border-bottom:2px solid transparent;
+}
+.app-tabs span.on{color:var(--ink);font-weight:600;border-bottom-color:var(--g-800);}
+.app-tabs span b{font-weight:500;color:var(--ink-3);margin-left:.3rem;}
+.tbl-scroll{overflow-x:auto;}
+table.mock{width:100%;border-collapse:collapse;font-size:.79rem;min-width:660px;}
+table.mock th{
+  text-align:left;font-weight:550;color:var(--ink-3);font-size:.68rem;
+  letter-spacing:.08em;text-transform:uppercase;
+  padding:.6rem 1rem;border-bottom:1px solid var(--line);background:#FAFBFE;
+}
+table.mock td{padding:.62rem 1rem;border-bottom:1px solid var(--paper-2);vertical-align:middle;}
+table.mock tr:last-child td{border-bottom:none;}
+table.mock tbody tr{transition:background-color 200ms ease;}
+table.mock tbody tr:hover{background:#F7F9FC;}
+/* rows resolve one by one */
+table.mock tbody tr.r{opacity:.35;transition:opacity 380ms ease,background-color 200ms ease;}
+table.mock tbody tr.r.done{opacity:1;}
+.stage-cell{position:relative;white-space:nowrap;}
+.stage-cell .tag{transition:opacity 300ms ease;}
+.stage-cell .tag-final{position:absolute;left:1rem;top:50%;transform:translateY(-50%);opacity:0;}
+tr.done .stage-cell .tag-wait{opacity:0;}
+tr.done .stage-cell .tag-final{opacity:1;}
+.tag-wait{background:#EDEFF5;color:#8A90A6;}
+.why-col span{opacity:0;transition:opacity 420ms ease 120ms;display:inline-block;}
+tr.done .why-col span{opacity:1;}
+.app-tabs span .cnt{font-variant-numeric:tabular-nums;}
+table.mock .num{font-family:"JetBrains Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.tag{
+  display:inline-block;font-size:.66rem;font-weight:600;letter-spacing:.03em;
+  padding:.15rem .5rem;border-radius:4px;white-space:nowrap;
+}
+.tag-det{background:var(--green-tint);color:var(--g-800);}
+.tag-ai{background:#E6EAF6;color:#3B4468;}
+.tag-flag{background:#F7E9E0;color:var(--rust);}
+.why-col{color:var(--ink-3);font-size:.74rem;}
+
+/* ---------- STACK STRIP ---------- */
+.strip{padding:clamp(2.75rem,5vw,3.75rem) 0;border-top:1px solid var(--line);}
+.strip p{text-align:center;font-size:.86rem;color:var(--ink-3);margin-bottom:2rem;}
+.stack{
+  display:grid;grid-template-columns:repeat(6,1fr);gap:1.5rem 1rem;align-items:center;
+}
+@media (max-width:860px){ .stack{grid-template-columns:repeat(3,1fr);} }
+.stack span{
+  text-align:center;font-size:.95rem;font-weight:550;color:var(--ink-3);
+  letter-spacing:-.01em;opacity:.85;cursor:default;
+  transition:color 240ms ease,opacity 240ms ease,transform 240ms ease;
+}
+.stack span:hover{color:var(--g-800);opacity:1;transform:translateY(-2px);}
+
+/* ---------- PIPELINE ---------- */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line-2);}
+@media (max-width:720px){ .steps{grid-template-columns:repeat(2,1fr);} }
+.step{
+  appearance:none;background:none;border:0;cursor:pointer;font-family:inherit;
+  text-align:left;padding:1.15rem 1.15rem 1.15rem 0;
+  border-top:2px solid transparent;margin-top:-1px;
+  display:flex;flex-direction:column;gap:.3rem;
+  color:var(--ink-3);transition:color var(--t),border-color var(--t);
+}
+.step:hover{color:var(--ink-2);}
+.step .sn{font-family:"JetBrains Mono",monospace;font-size:.68rem;letter-spacing:.14em;}
+.step .st{
+  font-family:"Newsreader",Georgia,serif;font-size:1.3rem;font-weight:400;
+  letter-spacing:-.015em;color:var(--ink-2);transition:color var(--t);
+}
+.step[aria-selected="true"]{border-top-color:var(--g-800);color:var(--ink);}
+.step[aria-selected="true"] .st{color:var(--ink);}
+
+.panel{
+  margin-top:2rem;background:var(--dark);color:var(--dark-ink);
+  border-radius:var(--r-lg);padding:clamp(1.75rem,3.5vw,2.75rem);
+}
+.panel-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:clamp(2rem,4vw,3.5rem);}
+@media (max-width:860px){ .panel-grid{grid-template-columns:1fr;} }
+.panel h3{color:var(--dark-ink);margin-bottom:.85rem;}
+.panel #p-body{color:var(--dark-ink-2);font-size:1.02rem;max-width:56ch;}
+.bar{height:3px;background:var(--dark-line);border-radius:2px;margin-top:1.8rem;overflow:hidden;}
+.bar span{display:block;height:100%;background:var(--g-400);transition:width 420ms cubic-bezier(.2,.6,.3,1);}
+.bar.flag span{background:#D08A4A;}
+.bar-lbl{font-family:"JetBrains Mono",monospace;font-size:.68rem;letter-spacing:.1em;color:var(--dark-ink-2);margin-top:.55rem;text-transform:uppercase;}
+.kv{align-self:start;}
+.kv-row{
+  display:flex;justify-content:space-between;gap:1.25rem;
+  padding:.75rem 0;border-bottom:1px solid var(--dark-line);font-size:.86rem;
+}
+.kv-row:first-child{border-top:1px solid var(--dark-line);}
+.kv-k{color:var(--dark-ink-2);white-space:nowrap;}
+.kv-v{color:var(--dark-ink);text-align:right;font-weight:500;}
+
+/* ---------- PRINCIPLES ---------- */
+.principles{border-top:1px solid var(--line);}
+.principle{
+  display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.6fr);
+  gap:1rem 4rem;padding:2.1rem 1.1rem;border-bottom:1px solid var(--line);
+  margin:0 -1.1rem;border-radius:var(--r);
+  transition:background-color 260ms ease;
+}
+.principle:hover{background:var(--paper-2);}
+.principle h3,.principle .idx{transition:color 240ms ease;}
+.principle:hover .idx{color:var(--g-600);}
+@media (max-width:860px){ .principle{grid-template-columns:1fr;gap:.6rem;padding:1.8rem 0;} }
+.principle h3{max-width:16ch;}
+.principle p{color:var(--ink-2);max-width:62ch;}
+.principle .idx{font-family:"JetBrains Mono",monospace;font-size:.68rem;letter-spacing:.14em;color:var(--ink-3);display:block;margin-bottom:.6rem;}
+
+/* ---------- METRICS ---------- */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--dark-line);border-radius:var(--r-lg);overflow:hidden;}
+@media (max-width:760px){ .metrics{grid-template-columns:repeat(2,1fr);} }
+.metric{background:var(--dark);padding:clamp(1.6rem,3vw,2.4rem) 1.4rem;transition:background-color 280ms ease;}
+.metric:hover{background:var(--dark-2);}
+.metric .num{transition:color 280ms ease;}
+.metric:hover .num{color:var(--g-400);}
+.metric .num{
+  font-family:"Newsreader",Georgia,serif;font-weight:300;
+  font-size:clamp(2.4rem,4.6vw,3.6rem);line-height:1;letter-spacing:-.03em;
+  color:var(--dark-ink);font-variant-numeric:tabular-nums;
+}
+.metric .lbl{font-size:.85rem;color:var(--dark-ink-2);margin-top:.7rem;max-width:20ch;}
+
+/* ---------- DOWNLOAD ---------- */
+.dl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;max-width:900px;}
+@media (max-width:720px){ .dl-grid{grid-template-columns:1fr;} }
+.dl{
+  display:block;text-decoration:none;background:var(--paper);
+  border:1px solid var(--line-2);border-radius:var(--r-lg);
+  padding:1.6rem;transition:border-color var(--t),background-color var(--t),transform var(--t);
+}
+.dl:hover{border-color:var(--g-600);background:#fff;transform:translateY(-2px);}
+.dl-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;}
+.dl-name{display:flex;align-items:center;gap:.55rem;font-family:"Newsreader",Georgia,serif;font-size:1.4rem;letter-spacing:-.015em;}
+.dl-name svg{width:19px;height:19px;flex:none;}
+.badge{
+  font-family:"Inter",sans-serif;font-size:.64rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  background:var(--green-tint);color:var(--g-800);padding:.18rem .48rem;border-radius:4px;
+}
+.dl-arrow{width:19px;height:19px;stroke:var(--ink-3);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:stroke var(--t),transform var(--t);}
+.dl:hover .dl-arrow{stroke:var(--g-800);transform:translateY(2px);}
+.dl-sub{display:block;margin-top:.8rem;font-size:.85rem;color:var(--ink-2);}
+.note{
+  display:flex;gap:.7rem;align-items:flex-start;margin-top:1.5rem;max-width:900px;
+  font-size:.875rem;color:var(--ink-2);background:var(--paper-2);
+  border:1px solid var(--line);border-radius:var(--r);padding:1rem 1.1rem;
+}
+.note svg{width:17px;height:17px;flex:none;stroke:var(--ink-3);fill:none;stroke-width:1.8;stroke-linecap:round;margin-top:.15rem;}
+
+/* ---------- FAQ ---------- */
+.faq{border-top:1px solid var(--line);}
+.faq details{border-bottom:1px solid var(--line);}
+.faq summary{
+  list-style:none;cursor:pointer;padding:1.5rem 0;
+  display:flex;align-items:center;justify-content:space-between;gap:2rem;
+  font-family:"Newsreader",Georgia,serif;font-size:clamp(1.15rem,2vw,1.45rem);
+  letter-spacing:-.015em;transition:color var(--t);
+}
+.faq summary::-webkit-details-marker{display:none;}
+.faq summary{padding-left:0;transition:color var(--t),padding-left 260ms cubic-bezier(.2,.6,.3,1);}
+.faq summary:hover{color:var(--g-800);padding-left:.5rem;}
+.faq summary:hover .chev{stroke:var(--g-800);}
+.chev{width:20px;height:20px;flex:none;stroke:var(--ink-3);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;transition:transform var(--t);}
+.faq details[open] .chev{transform:rotate(180deg);}
+.ans{padding:0 0 1.6rem;color:var(--ink-2);max-width:72ch;font-size:.98rem;}
+
+/* ---------- ASSURANCE ---------- */
+.assure{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:2rem;}
+.assure span{
+  font-size:.8rem;font-weight:500;color:var(--g-800);cursor:default;
+  border:1px solid var(--line-2);border-radius:100px;padding:.42rem .95rem;background:var(--green-tint);
+  transition:background-color 240ms ease,color 240ms ease,border-color 240ms ease,transform 240ms ease;
+}
+.assure span:hover{background:var(--g-800);color:#fff;border-color:var(--g-800);transform:translateY(-2px);}
+
+
+/* ---------- CONTACT ---------- */
+.contact-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;}
+@media (max-width:860px){ .contact-grid{grid-template-columns:1fr;} }
+.cc{
+  display:block;text-decoration:none;background:var(--paper);
+  border:1px solid var(--line-2);border-radius:var(--r-lg);padding:1.6rem;
+  transition:border-color 260ms ease,background-color 260ms ease,transform 260ms cubic-bezier(.2,.6,.3,1);
+}
+.cc:hover{border-color:var(--g-600);background:#fff;transform:translateY(-3px);}
+.cc .cc-k{display:block;font-family:"JetBrains Mono",monospace;font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--g-800);margin-bottom:.9rem;}
+.cc .cc-v{display:flex;align-items:center;gap:.5rem;font-family:"Newsreader",Georgia,serif;font-size:1.3rem;letter-spacing:-.015em;color:var(--ink);}
+.cc .cc-v svg{width:16px;height:16px;flex:none;stroke:var(--ink-3);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:stroke 240ms ease,transform 260ms cubic-bezier(.2,.6,.3,1);}
+.cc:hover .cc-v svg{stroke:var(--g-800);transform:translate(3px,-3px);}
+.cc .cc-n{display:block;margin-top:.7rem;font-size:.88rem;color:var(--ink-2);}
+.mailto-big{
+  display:inline-flex;align-items:center;gap:.6rem;margin-top:1.4rem;
+  font-family:"Newsreader",Georgia,serif;font-size:clamp(1.5rem,3.4vw,2.4rem);
+  letter-spacing:-.02em;color:var(--ink);text-decoration:none;position:relative;
+}
+.mailto-big::after{
+  content:"";position:absolute;left:0;right:0;bottom:.06em;height:1.5px;background:var(--g-600);
+  transform:scaleX(0);transform-origin:left;transition:transform 380ms cubic-bezier(.2,.6,.3,1);
+}
+.mailto-big:hover{color:var(--g-800);}
+.mailto-big:hover::after{transform:scaleX(1);}
+
+/* ---------- CTA BAND ---------- */
+.band{
+  background:var(--dark);color:var(--dark-ink);border-radius:var(--r-lg);
+  padding:clamp(2.5rem,6vw,4.5rem);text-align:center;
+}
+.band h2{color:var(--dark-ink);margin:0 auto 1.1rem;max-width:18ch;}
+.band p{color:var(--dark-ink-2);max-width:48ch;margin:0 auto 2rem;}
+.band .cta-row{justify-content:center;}
+
+/* ---------- FOOTER ---------- */
+footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;}
+.foot-top{display:grid;grid-template-columns:minmax(0,1.4fr) repeat(2,minmax(0,1fr));gap:2.5rem;margin-bottom:3.5rem;}
+@media (max-width:760px){ .foot-top{grid-template-columns:1fr 1fr;} .foot-brand{grid-column:1/-1;} }
+.foot-brand p{color:var(--ink-2);font-size:.92rem;max-width:34ch;margin-top:1rem;}
+.foot-col h5{font-size:.7rem;font-family:"JetBrains Mono",monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:500;margin-bottom:1rem;}
+.foot-col a{display:block;text-decoration:none;color:var(--ink-2);font-size:.9rem;padding:.28rem 0;transition:color var(--t);}
+.foot-col a{transition:color var(--t),transform 240ms cubic-bezier(.2,.6,.3,1);}
+.foot-col a:hover{color:var(--g-800);transform:translateX(4px);}
+.foot-bot{display:flex;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;padding-top:1.75rem;border-top:1px solid var(--line);font-size:.83rem;color:var(--ink-3);}
+</style>
+</head>
+<body>
+
+<div class="ticker">
+  <div class="tk-track"><div class="tk-set"><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Fully offline by default</b> — no API key, no outbound call.</span><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Deterministic first</b> — the model only sees what the rules could not resolve.</span><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Every row is traceable</b> — the workbook says why each pair matched.</span><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Fails loudly</b> — it refuses rather than publishing a number it cannot verify.</span><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Models bundled</b> — nothing downloads on first launch.</span></div><div class="tk-set" aria-hidden="true"><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Fully offline by default</b> — no API key, no outbound call.</span><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Deterministic first</b> — the model only sees what the rules could not resolve.</span><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Every row is traceable</b> — the workbook says why each pair matched.</span><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Fails loudly</b> — it refuses rather than publishing a number it cannot verify.</span><span class="tk-item"><span class="tk-sep" aria-hidden="true"></span><b>Models bundled</b> — nothing downloads on first launch.</span></div></div>
+</div>
+
+<header>
+  <div class="wrap">
+    <nav class="nav">
+      <a class="brand" href="#top" aria-label="Munim AI — home"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle class="d-lg" cx="19" cy="5" r="2.15"/><circle class="d-lg" cx="5" cy="12" r="2.15"/><circle class="d-lg" cx="12" cy="19" r="2.15"/><circle class="d-sm" cx="5" cy="5" r="1.27"/><circle class="d-sm" cx="12" cy="5" r="1.27"/><circle class="d-sm" cx="12" cy="12" r="1.27"/><circle class="d-sm" cx="5" cy="19" r="1.27"/><circle class="d-sm" cx="19" cy="19" r="1.27"/></svg><span class="wm">Munim <b>AI</b></span></a>
+      <div class="navlinks">
+        <div class="menubar" role="menubar" aria-label="Main">
+          <div class="mb-item">
+            <button class="mb-trigger" id="t-product" aria-haspopup="true" aria-expanded="false" aria-controls="m-product">Product<svg class="mb-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div class="mb-menu" id="m-product" role="menu" aria-labelledby="t-product">
+              <a class="mb-link" role="menuitem" href="#pipeline"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 7.5l9 4.5 9-4.5Z"/><path d="M3 12l9 4.5L21 12"/><path d="M3 16.5 12 21l9-4.5"/></svg><span><b>Pipeline</b><i>Four stages — each one auditable on its own</i></span></a>
+              <a class="mb-link" role="menuitem" href="#why"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 5.8v5.1c0 4.2 2.9 8 7 9.4 4.1-1.4 7-5.2 7-9.4V5.8Z"/><path d="m9.4 11.8 1.9 1.9 3.3-3.5"/></svg><span><b>Principles</b><i>Why it refuses rather than guesses</i></span></a>
+              <a class="mb-link" role="menuitem" href="#metrics"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/></svg><span><b>By the numbers</b><i>165 offline tests, 0 bytes off the machine</i></span></a>
+            </div>
+          </div>
+          <div class="mb-item">
+            <button class="mb-trigger" id="t-download" aria-haspopup="true" aria-expanded="false" aria-controls="m-download">Download<svg class="mb-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div class="mb-menu" id="m-download" role="menu" aria-labelledby="t-download">
+              <a class="mb-link" role="menuitem" href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-windows.zip"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.7 10.5 4.6v6.8H3Z"/><path d="M12.4 4.3 21 3v8.4h-8.6Z"/><path d="M3 12.6h7.5v6.8L3 18.3Z"/><path d="M12.4 12.6H21V21l-8.6-1.3Z"/></svg><span><b>Windows</b><i>Windows 10 / 11 · 64-bit · ~2.7 GB</i></span></a>
+              <a class="mb-link" role="menuitem" href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-macos.zip"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6c.9-1.9 2.8-2.8 4.2-2.8.2 1.9-.6 3.2-1.5 4.1"/><path d="M16.8 8.4c-1.4 0-2.2.7-3.3.7s-1.9-.7-3.1-.7C8.2 8.4 6 10.2 6 13.6c0 3.2 2.2 6.6 4.1 6.6 1 0 1.6-.6 2.9-.6s1.8.6 2.9.6c1.9 0 4.1-3.4 4.1-6.6 0-2.9-1.9-4.6-2.8-5.2Z"/></svg><span><b>macOS</b><i>Apple Silicon · Metal GPU · ~2.7 GB</i></span></a>
+              <div class="mb-sep" role="separator"></div>
+              <a class="mb-link" role="menuitem" href="#download"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6.8v10.4L12 21l8-3.8V6.8Z"/><path d="M4 6.8 12 10.6l8-3.8"/><path d="M12 10.6V21"/></svg><span><b>What you get</b><i>Bundled models, nothing downloads on launch</i></span></a>
+            </div>
+          </div>
+          <div class="mb-item">
+            <button class="mb-trigger" id="t-support" aria-haspopup="true" aria-expanded="false" aria-controls="m-support">Support<svg class="mb-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div class="mb-menu align-right" id="m-support" role="menu" aria-labelledby="t-support">
+              <a class="mb-link" role="menuitem" href="#faq"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><circle cx="12" cy="17.2" r=".9" fill="currentColor" stroke="none"/></svg><span><b>FAQ</b><i>Banks, GPUs, scanned PDFs</i></span></a>
+              <a class="mb-link" role="menuitem" href="#why"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8.2 10.5V7.8a3.8 3.8 0 0 1 7.6 0v2.7"/></svg><span><b>Privacy posture</b><i>No API key, no outbound call</i></span></a>
+              <div class="mb-sep" role="separator"></div>
+              <a class="mb-link" role="menuitem" href="#contact"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m3.8 7 7.3 5.3a1.5 1.5 0 0 0 1.8 0L20.2 7"/></svg><span><b>Contact</b><i>Reach the person who built it</i></span></a>
+            </div>
+          </div>
+        </div>
+        <button class="mb-burger" id="burger" aria-expanded="false" aria-controls="mobile-sheet">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          Menu
+        </button>
+        <a class="btn btn-primary nav-cta" href="#download">Install it</a>
+      </div>
+    </nav>
+  </div>
+  <div class="mb-sheet" id="mobile-sheet">
+    <div class="wrap" style="padding:0;">
+      <h6>Product</h6>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#why">Principles</a>
+      <a href="#metrics">By the numbers</a>
+      <h6>Download</h6>
+      <a href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-windows.zip">Windows</a>
+      <a href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-macos.zip">macOS</a>
+      <a href="#download">What you get</a>
+      <h6>Support</h6>
+      <a href="#faq">FAQ</a>
+      <a href="#why">Privacy posture</a>
+      <a href="#contact">Contact</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- HERO -->
+<div class="hero">
+  <div class="wrap">
+    <span class="pill"><span class="dot" aria-hidden="true"></span> A copilot for CAs — not a replacement</span>
+    <h1>Reconciliation that never leaves your laptop.</h1>
+    <p class="dek">Munim AI takes the reconciliation labour off a chartered accountant's plate — matching statements to ledgers, catching the anomalies a spreadsheet misses, exporting an audit-ready report where every row explains itself — so your hours go to the judgment calls you actually trained for.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#download">
+        <svg viewBox="0 0 24 24"><path d="M12 3v13"/><path d="M7 12l5 5 5-5"/><path d="M4 21h16"/></svg>
+        Install it
+      </a>
+      <a class="btn btn-ghost" href="#pipeline">See how it works</a>
+      <span class="cta-note">Windows &amp; macOS · no Python, no terminal</span>
+    </div>
+
+    <div class="rv showcase">
+      <div class="panel-dark">
+        <div class="panel-head">
+          <div class="lede">
+            <span class="eyebrow">The output</span>
+            <h3>One workbook. Four tabs. Every row says why.</h3>
+            <p>Matched, AI Matched, Unmatched, Anomalies — the review queue splits by the kind of attention each row needs.</p>
+          </div>
+          <a class="btn btn-on-dark" href="#pipeline">Walk the pipeline</a>
+        </div>
+
+        <div class="app">
+          <div class="app-bar">
+            <span class="tl" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="ttl">reconciliation_2026-03.xlsx</span>
+            <span class="badge-ok"><span class="dot" aria-hidden="true"></span> Offline · localhost</span>
+          </div>
+          <div class="app-tabs" aria-hidden="true">
+            <span class="on">Matched <b class="cnt" data-to="412">0</b></span>
+            <span>AI Matched <b class="cnt" data-to="37">0</b></span>
+            <span>Unmatched <b class="cnt" data-to="9">0</b></span>
+            <span>Anomalies <b class="cnt" data-to="6">0</b></span>
+          </div>
+          <div class="tbl-scroll">
+            <table class="mock" aria-label="Example reconciliation output rows">
+              <thead>
+                <tr><th>Date</th><th>Description</th><th>Amount</th><th>Stage</th><th>Corroboration</th></tr>
+              </thead>
+              <tbody>
+                <tr class="r"><td class="num">04 Mar</td><td>NEFT — SHARMA TEXTILES</td><td class="num">₹ 2,45,000.00</td><td class="stage-cell"><span class="tag tag-wait">Matching…</span><span class="tag tag-final tag-det">Deterministic</span></td><td class="why-col"><span>shared reference</span></td></tr>
+                <tr class="r"><td class="num">06 Mar</td><td>UPI — VENDOR PAYOUT 8821</td><td class="num">₹ 18,400.00</td><td class="stage-cell"><span class="tag tag-wait">Matching…</span><span class="tag tag-final tag-det">Deterministic</span></td><td class="why-col"><span>amount + date</span></td></tr>
+                <tr class="r"><td class="num">09 Mar</td><td>CHQ 004512 — clearing</td><td class="num">₹ 1,10,000.00</td><td class="stage-cell"><span class="tag tag-wait">Matching…</span><span class="tag tag-final tag-ai">AI matched</span></td><td class="why-col"><span>description restated in ledger</span></td></tr>
+                <tr class="r"><td class="num">14 Mar</td><td>RTGS — AXIS / partial settle</td><td class="num">₹ 9,99,000.00</td><td class="stage-cell"><span class="tag tag-wait">Matching…</span><span class="tag tag-final tag-flag">Flagged</span></td><td class="why-col"><span>just under threshold</span></td></tr>
+                <tr class="r"><td class="num">18 Mar</td><td>NEFT — SHARMA TEXTILES</td><td class="num">₹ 2,45,000.00</td><td class="stage-cell"><span class="tag tag-wait">Matching…</span><span class="tag tag-final tag-flag">Flagged</span></td><td class="why-col"><span>possible duplicate of 04 Mar</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STACK STRIP -->
+<div class="strip">
+  <div class="wrap">
+    <p>Built on an open, local stack — everything runs on the machine doing the reconciliation</p>
+    <div class="stack">
+      <span>llama.cpp</span>
+      <span>Qwen 2.5</span>
+      <span>FastAPI</span>
+      <span>pandas</span>
+      <span>openpyxl</span>
+      <span>pypdf</span>
+    </div>
+  </div>
+</div>
+
+<!-- PIPELINE -->
+<section id="pipeline">
+  <div class="wrap">
+    <div class="rv sec-head">
+      <div>
+        <span class="eyebrow">The pipeline</span>
+        <h2>Four stages. Click one.</h2>
+      </div>
+      <p class="sub">Each stage hands only its leftovers to the next. That's the whole design: the cheap, explainable work happens first, and the model never touches a row the rules already resolved.</p>
+    </div>
+
+    <div class="steps" role="tablist" aria-label="Pipeline stages">
+      <button class="step" role="tab" id="tab-0" aria-controls="stage-panel" aria-selected="true" data-i="0">
+        <span class="sn">STAGE 00</span><span class="st">Ingest</span>
+      </button>
+      <button class="step" role="tab" id="tab-1" aria-controls="stage-panel" aria-selected="false" tabindex="-1" data-i="1">
+        <span class="sn">STAGE 01</span><span class="st">Match</span>
+      </button>
+      <button class="step" role="tab" id="tab-2" aria-controls="stage-panel" aria-selected="false" tabindex="-1" data-i="2">
+        <span class="sn">STAGE 02</span><span class="st">AI net</span>
+      </button>
+      <button class="step" role="tab" id="tab-3" aria-controls="stage-panel" aria-selected="false" tabindex="-1" data-i="3">
+        <span class="sn">STAGE 03</span><span class="st">Flag</span>
+      </button>
+    </div>
+
+    <div class="panel" id="stage-panel" role="tabpanel" aria-labelledby="tab-0" tabindex="0">
+      <div class="panel-grid">
+        <div>
+          <h3 id="p-title">Ingest</h3>
+          <p id="p-body">Loading.</p>
+          <div class="bar" id="p-bar" aria-hidden="true"><span style="width:0%"></span></div>
+          <div class="bar-lbl" id="p-barlbl">Share of rows still open at this stage</div>
+        </div>
+        <div class="kv" id="p-kv"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WHY -->
+<section id="why">
+  <div class="wrap">
+    <div class="rv sec-head">
+      <div>
+        <span class="eyebrow">Why it's built this way</span>
+        <h2>Deterministic beats model, every time.</h2>
+      </div>
+      <p class="sub">Rules learned the hard way while building it — and each one shows up in the architecture, not just the README.</p>
+    </div>
+
+    <div class="rv principles">
+      <div class="principle">
+        <div><span class="idx">01</span><h3>Client data never leaves the machine</h3></div>
+        <p>Extraction, embeddings, and match confirmation all run against a local llama.cpp server. There is no default network call to any provider, and no API key to configure. Hosted backends exist behind a <code>Protocol</code> if you want them — you have to opt in.</p>
+      </div>
+      <div class="principle">
+        <div><span class="idx">02</span><h3>Fails loudly</h3></div>
+        <p>A wrong number in a financial report is worse than no report. Extraction refuses rather than publishing figures it can't reconcile against the running balance.</p>
+      </div>
+      <div class="principle">
+        <div><span class="idx">03</span><h3>Every row is traceable</h3></div>
+        <p>The Matched tab carries a corroboration column: shared reference, matching description, or amount-and-date-only — so a reviewer knows which pairs to double-check.</p>
+      </div>
+      <div class="principle">
+        <div><span class="idx">04</span><h3>Degrades gracefully</h3></div>
+        <p>Kill both model servers and it still reconciles. Stage 1's matches are never lost to a Stage 2 failure — the leftovers just land in the review queue.</p>
+      </div>
+      <div class="principle">
+        <div><span class="idx">05</span><h3>One bank at a time</h3></div>
+        <p>PDF templates are built and validated per bank, not as a generic parser. Each real-world layout quirk gets locked into a regression test.</p>
+      </div>
+    </div>
+
+    <div class="assure">
+      <span>No API key</span>
+      <span>No outbound calls</span>
+      <span>localhost only</span>
+      <span>Offline test suite</span>
+      <span>Models bundled in the app</span>
+    </div>
+  </div>
+</section>
+
+<!-- METRICS -->
+<section id="metrics">
+  <div class="wrap">
+    <div class="rv sec-head">
+      <div>
+        <span class="eyebrow">By the numbers</span>
+        <h2>Small surface. Auditable everywhere.</h2>
+      </div>
+      <p class="sub">Nothing here depends on a vendor being up, a key being valid, or a network being available.</p>
+    </div>
+    <div class="rv metrics">
+      <div class="metric"><div class="num">4</div><div class="lbl">pipeline stages, each one auditable on its own</div></div>
+      <div class="metric"><div class="num">165</div><div class="lbl">tests, run fully offline against an in-memory transport</div></div>
+      <div class="metric"><div class="num">3</div><div class="lbl">input formats — CSV, Excel, text-layer PDF</div></div>
+      <div class="metric"><div class="num">0</div><div class="lbl">bytes sent off the machine in the default configuration</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- DOWNLOAD -->
+<section id="download">
+  <div class="wrap">
+    <div class="rv sec-head">
+      <div>
+        <span class="eyebrow">Download</span>
+        <h2>Unzip and run. That's it.</h2>
+      </div>
+      <p class="sub">No Python, no terminal, no dependencies. Download the zip for your platform, unzip it, and double-click the app. The AI models are bundled — nothing downloads on first launch.</p>
+    </div>
+
+    <div class="rv dl-grid">
+      <a class="dl" href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-windows.zip">
+        <span class="dl-top">
+          <span class="dl-name">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 5.5l8-1.2v7.2H3zM13 4l8-1.2v8.7h-8zM3 12.5h8v7.2l-8-1.2zM13 12.5h8v8.7L13 20z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            Windows <span class="badge">available</span>
+          </span>
+          <svg class="dl-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13"/><path d="M7 12l5 5 5-5"/><path d="M4 21h16"/></svg>
+        </span>
+        <span class="dl-sub">Windows 10 / 11 · 64-bit · ~2.7 GB · GPU accelerated (Vulkan)</span>
+      </a>
+
+      <a class="dl" href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-macos.zip">
+        <span class="dl-top">
+          <span class="dl-name">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 6c1-2 3-3 4.5-3 .2 2-.6 3.4-1.6 4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M17 8.5c-1.5 0-2.4.8-3.5.8S11 8.5 9.7 8.5C7.4 8.5 5 10.4 5 14c0 3.4 2.4 7 4.4 7 1.1 0 1.7-.7 3.1-.7s1.9.7 3.1.7c2 0 4.4-3.6 4.4-7 0-3.1-2-4.9-3-5.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            macOS <span class="badge">available</span>
+          </span>
+          <svg class="dl-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13"/><path d="M7 12l5 5 5-5"/><path d="M4 21h16"/></svg>
+        </span>
+        <span class="dl-sub">Apple Silicon · Metal GPU · ~2.7 GB</span>
+      </a>
+    </div>
+
+    <div class="note">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>
+      <span>Unzip the archive and run <strong>ReconciliationEngine\ReconciliationEngine.exe</strong>. On first launch it loads the AI models onto the GPU — this takes around 15 seconds. Nothing leaves the machine.</span>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq">
+  <div class="wrap">
+    <div class="rv sec-head">
+      <div>
+        <span class="eyebrow">Questions</span>
+        <h2>The ones people actually ask.</h2>
+      </div>
+    </div>
+    <div class="faq">
+      <details open>
+        <summary>Does it work on Windows?<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="ans">Yes. The engine is pure Python — FastAPI, pandas, openpyxl, pypdf, httpx all ship Windows wheels, and llama.cpp has native Windows builds. Only the README's shell commands need translating: <code>py -3 -m venv</code>, <code>.venv\Scripts\Activate.ps1</code>, and two separate PowerShell windows instead of backgrounding with <code>&amp;</code>.</div>
+      </details>
+      <details>
+        <summary>Do I need a GPU?<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="ans">No, but a 3B model on CPU is slow — the default request timeout is 300 seconds for exactly that reason. On Windows with an NVIDIA card, a CUDA-enabled llama.cpp build is a large speedup. You can also skip the model servers entirely and get deterministic reconciliation only.</div>
+      </details>
+      <details>
+        <summary>Which banks are supported?<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="ans">HDFC today. PDF templates are built one bank at a time and validated against a real statement each, rather than shipping a generic parser that quietly misreads columns. Adding one means implementing <code>build_prompt()</code> and <code>parse_response()</code> and registering it — it then appears in the UI dropdown automatically.</div>
+      </details>
+      <details>
+        <summary>Scanned PDFs?<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="ans">Not in v1. Extraction reads the PDF text layer, so a scanned page yields nothing and raises a clear error instead of silently returning empty results. Scanned support needs OCR or a hosted vision model — both are wired but off by default.</div>
+      </details>
+      <details>
+        <summary>Is my data sent anywhere?<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="ans">No. The default configuration has no API key and makes no outbound call — both model servers run on localhost. The test suite is offline too, exercised against an in-memory HTTP transport.</div>
+      </details>
+    </div>
+  </div>
+</section>
+
+
+<!-- CONTACT -->
+<section id="contact">
+  <div class="wrap">
+    <div class="rv sec-head">
+      <div>
+        <span class="eyebrow">Contact</span>
+        <h2>Talk to the person who built it.</h2>
+      </div>
+      <p class="sub">Munim AI is early. If a statement layout breaks it, if your bank isn't supported yet, or if you want to try it on a real reconciliation — write in. Every message reaches a human.</p>
+    </div>
+
+    <a class="mailto-big" href="mailto:harshilmalik2025@gmail.com?subject=Munim%20AI">harshilmalik2025@gmail.com</a>
+
+    <div class="rv contact-grid" style="margin-top:3rem;">
+      <a class="cc" href="mailto:harshilmalik2025@gmail.com?subject=Munim%20AI%20—%20bank%20template%20request">
+        <span class="cc-k">Request a bank</span>
+        <span class="cc-v">Add my bank <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></span>
+        <span class="cc-n">Templates are built one bank at a time. Send a sample statement and it goes on the list.</span>
+      </a>
+      <a class="cc" href="mailto:harshilmalik2025@gmail.com?subject=Munim%20AI%20—%20bug%20report">
+        <span class="cc-k">Report a bug</span>
+        <span class="cc-v">Something broke <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></span>
+        <span class="cc-n">Especially a row that matched wrongly — those become regression tests.</span>
+      </a>
+      <a class="cc" href="mailto:harshilmalik2025@gmail.com?subject=Munim%20AI%20—%20hello">
+        <span class="cc-k">Anything else</span>
+        <span class="cc-v">Just say hello <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></span>
+        <span class="cc-n">Feedback from practising CAs shapes what gets built next.</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- CTA BAND -->
+<section id="cta" style="border-top:none;padding-top:clamp(1rem,2vw,2rem);">
+  <div class="wrap">
+    <div class="rv band">
+      <h2>Give the grunt work to the machine.</h2>
+      <p>Download it, point it at a statement and a ledger, and keep the judgment calls for yourself.</p>
+      <div class="cta-row">
+        <a class="btn btn-green" href="#download">
+          <svg viewBox="0 0 24 24"><path d="M12 3v13"/><path d="M7 12l5 5 5-5"/><path d="M4 21h16"/></svg>
+          Install it
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-top">
+      <div class="foot-brand">
+        <a class="brand" href="#top" aria-label="Munim AI — home"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle class="d-lg" cx="19" cy="5" r="2.15"/><circle class="d-lg" cx="5" cy="12" r="2.15"/><circle class="d-lg" cx="12" cy="19" r="2.15"/><circle class="d-sm" cx="5" cy="5" r="1.27"/><circle class="d-sm" cx="12" cy="5" r="1.27"/><circle class="d-sm" cx="12" cy="12" r="1.27"/><circle class="d-sm" cx="5" cy="19" r="1.27"/><circle class="d-sm" cx="19" cy="19" r="1.27"/></svg><span class="wm">Munim <b>AI</b></span></a>
+        <p>A copilot for chartered accountants. Runs entirely on your machine — client data never leaves it.</p>
+      </div>
+      <div class="foot-col">
+        <h5>Product</h5>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#why">Principles</a>
+        <a href="#metrics">By the numbers</a>
+        <a href="#download">Download</a>
+      </div>
+      <div class="foot-col">
+        <h5>Details</h5>
+        <a href="#faq">FAQ</a>
+        <a href="#why">Privacy posture</a>
+        <a href="#download">Supported platforms</a>
+        <a href="#contact">Contact</a>
+      </div>
+    </div>
+    <div class="foot-bot">
+      <span>Munim AI — reconciliation, offline by default.</span>
+      <span>Data never leaves your machine.</span>
+    </div>
+  </div>
+</footer>
+
+<div class="sr" role="status" aria-live="polite" id="live"></div>
+
+<script>
+(function(){
+  /* ---- pipeline stepper ---- */
+  var STAGES = [
+    { t:'Ingest',
+      b:'CSV, Excel, and text-layer PDFs are pulled into one canonical Transaction schema. Per-bank templates handle each statement layout, and a running-balance audit checks every amount against the printed balance before it can reach the report.',
+      w:100, flag:false,
+      kv:[['Formats','CSV · XLSX · PDF'],['Module','app/ingestion/'],['Safety net','running-balance audit'],['On failure','refuses, names the row']] },
+    { t:'Deterministic matching',
+      b:'Exact amount first, then a date tolerance window, then fuzzy description as a tiebreak. No model is involved at all, so every pairing carries a reason a chartered accountant can audit line by line.',
+      w:72, flag:false,
+      kv:[['Order','amount → date → text'],['Module','app/matching/'],['Model used','none'],['Output','Matched tab']] },
+    { t:'AI matching net',
+      b:"Only what Stage 1 could not resolve. A local embedding model builds a shortlist of candidates, then the local Qwen model confirms or rejects each one with a written reason. Anything under the confidence threshold goes to the review queue rather than being asserted as a match.",
+      w:23, flag:false,
+      kv:[['Input','Stage 1 leftovers only'],['Module','app/ai_matching/'],['Models','Qwen 2.5-3B + Qwen3-0.6B'],['Below threshold','→ CA review queue']] },
+    { t:'Anomaly detection',
+      b:'Runs across the full reconciled set, matched rows included: duplicates, threshold avoidance, round numbers, reversals, timing gaps. Kept strictly separate from matching, because a missed match wastes time while a missed anomaly hides risk.',
+      w:9, flag:true,
+      kv:[['Scope','all rows, not leftovers'],['Module','app/anomaly/'],['Rules','duplicate · round · reversal'],['Output','Anomalies tab']] }
+  ];
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.step'));
+  var pt = document.getElementById('p-title'), pb = document.getElementById('p-body');
+  var pbar = document.getElementById('p-bar'), pkv = document.getElementById('p-kv');
+
+  function renderStage(i){
+    var s = STAGES[i];
+    pt.textContent = s.t;
+    pb.textContent = s.b;
+    pbar.classList.toggle('flag', s.flag);
+    pbar.firstElementChild.style.width = s.w + '%';
+    pkv.innerHTML = '';
+    s.kv.forEach(function(row){
+      var d = document.createElement('div');
+      d.className = 'kv-row';
+      var k = document.createElement('span'); k.className='kv-k'; k.textContent=row[0];
+      var v = document.createElement('span'); v.className='kv-v'; v.textContent=row[1];
+      d.appendChild(k); d.appendChild(v); pkv.appendChild(d);
+    });
+    document.getElementById('stage-panel').setAttribute('aria-labelledby','tab-'+i);
+  }
+  function selectStage(i, focus){
+    tabs.forEach(function(t,j){
+      var on = i===j;
+      t.setAttribute('aria-selected', on ? 'true':'false');
+      t.tabIndex = on ? 0 : -1;
+      if(on && focus) t.focus();
+    });
+    renderStage(i);
+  }
+  tabs.forEach(function(t,i){
+    t.addEventListener('click', function(){ selectStage(i,false); });
+    t.addEventListener('keydown', function(e){
+      var n = e.key==='ArrowRight' ? i+1 : e.key==='ArrowLeft' ? i-1 : e.key==='Home' ? 0 : e.key==='End' ? tabs.length-1 : null;
+      if(n===null) return;
+      e.preventDefault();
+      selectStage((n+tabs.length)%tabs.length, true);
+    });
+  });
+  renderStage(0);
+
+  document.documentElement.classList.add('js');
+  var RM = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---- sticky header hairline: only once you've scrolled ---- */
+  var hdr = document.querySelector('header');
+  function onScroll(){ hdr.classList.toggle('stuck', window.scrollY > 90); }
+  onScroll();
+  window.addEventListener('scroll', onScroll, {passive:true});
+
+  /* ---- scroll reveal ---- */
+  var rv = Array.prototype.slice.call(document.querySelectorAll('.rv'));
+  if(RM || !('IntersectionObserver' in window)){
+    rv.forEach(function(el){ el.classList.add('in'); });
+  } else {
+    var rio = new IntersectionObserver(function(es){
+      es.forEach(function(e){
+        if(e.isIntersecting){ e.target.classList.add('in'); rio.unobserve(e.target); }
+      });
+    }, {rootMargin:'0px 0px -12% 0px', threshold:.08});
+    rv.forEach(function(el){ rio.observe(el); });
+    setTimeout(function(){ rv.forEach(function(el){ el.classList.add('in'); }); }, 4000);
+  }
+
+  /* ---- count-up numbers ---- */
+  function countUp(el){
+    var to = parseInt(el.dataset.to, 10);
+    if(RM){ el.textContent = to; return; }
+    var dur = 1100, t0 = null;
+    function tick(t){
+      if(t0===null) t0 = t;
+      var k = Math.min(1, (t - t0)/dur);
+      var e = 1 - Math.pow(1 - k, 3);
+      el.textContent = Math.round(to * e);
+      if(k < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  /* ---- hero mock: rows resolve one by one, tab counts tick up ---- */
+  var appEl = document.querySelector('.app');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('table.mock tbody tr.r'));
+  var counters = Array.prototype.slice.call(document.querySelectorAll('.app-tabs .cnt'));
+  var mockRun = false;
+  function runMock(){
+    if(mockRun) return; mockRun = true;
+    counters.forEach(countUp);
+    rows.forEach(function(r,i){
+      if(RM){ r.classList.add('done'); return; }
+      setTimeout(function(){ r.classList.add('done'); }, 420 + i*260);
+    });
+  }
+
+  /* ---- metrics count-up ---- */
+  var metricNums = Array.prototype.slice.call(document.querySelectorAll('.metric .num'));
+  metricNums.forEach(function(el){ el.dataset.to = el.textContent.trim(); el.textContent = '0'; });
+  var metricsRun = false;
+  function runMetrics(){
+    if(metricsRun) return; metricsRun = true;
+    metricNums.forEach(function(el,i){ setTimeout(function(){ countUp(el); }, i*110); });
+  }
+
+  if(!('IntersectionObserver' in window)){
+    runMock(); runMetrics();
+  } else {
+    var vio = new IntersectionObserver(function(es){
+      es.forEach(function(e){
+        if(!e.isIntersecting) return;
+        if(e.target === appEl) runMock();
+        else runMetrics();
+        vio.unobserve(e.target);
+      });
+    }, {threshold:.25});
+    if(appEl) vio.observe(appEl);
+    var mg = document.querySelector('.metrics');
+    if(mg) vio.observe(mg);
+  }
+
+  /* ---- menubar ---- */
+  var mbItems = Array.prototype.slice.call(document.querySelectorAll('.mb-item'));
+  var openItem = null;
+  // set when a hover switched menus, so the click that follows doesn't
+  // immediately toggle the menu it just opened
+  var hoverSwitched = false;
+
+  function itemsOf(it){ return Array.prototype.slice.call(it.querySelectorAll('.mb-link')); }
+  function closeMenu(it, focusTrigger){
+    if(!it) return;
+    it.classList.remove('open');
+    it.querySelector('.mb-trigger').setAttribute('aria-expanded','false');
+    if(openItem === it) openItem = null;
+    if(focusTrigger) it.querySelector('.mb-trigger').focus();
+  }
+  function openMenu(it){
+    if(openItem && openItem !== it) closeMenu(openItem, false);
+    it.classList.add('open');
+    it.querySelector('.mb-trigger').setAttribute('aria-expanded','true');
+    openItem = it;
+  }
+  function closeAll(focusTrigger){ hoverSwitched = false; closeMenu(openItem, focusTrigger); }
+  // the menu is visibility:hidden until the class lands, and focus() is a no-op
+  // on a hidden element — so wait a frame for it to actually render
+  function focusItem(it, i){
+    requestAnimationFrame(function(){
+      var l = itemsOf(it); if(!l.length) return;
+      (i < 0 ? l[l.length-1] : l[i]).focus();
+    });
+  }
+
+  mbItems.forEach(function(it, i){
+    var trig = it.querySelector('.mb-trigger');
+
+    trig.addEventListener('click', function(e){
+      e.stopPropagation();
+      if(hoverSwitched){ hoverSwitched = false; return; }
+      it.classList.contains('open') ? closeMenu(it,false) : openMenu(it);
+    });
+
+    // once a menu is open, hovering a sibling trigger switches to it —
+    // this is what makes a menubar feel like a menubar rather than a row of dropdowns
+    trig.addEventListener('mouseenter', function(){
+      if(openItem && openItem !== it){ openMenu(it); hoverSwitched = true; }
+    });
+
+    trig.addEventListener('keydown', function(e){
+      if(e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' '){
+        e.preventDefault(); openMenu(it); focusItem(it, 0);
+      } else if(e.key === 'ArrowUp'){
+        e.preventDefault(); openMenu(it); focusItem(it, -1);
+      } else if(e.key === 'ArrowRight' || e.key === 'ArrowLeft'){
+        e.preventDefault();
+        var n = (i + (e.key === 'ArrowRight' ? 1 : -1) + mbItems.length) % mbItems.length;
+        var nt = mbItems[n].querySelector('.mb-trigger');
+        nt.focus();
+        if(openItem) openMenu(mbItems[n]);
+      } else if(e.key === 'Escape'){ closeAll(true); }
+    });
+
+    it.addEventListener('keydown', function(e){
+      // the trigger's own keydown bubbles up here; without this guard one
+      // ArrowDown is handled twice and lands on the second item
+      if(e.target === trig) return;
+      var links = itemsOf(it), idx = links.indexOf(document.activeElement);
+      if(idx === -1) return;
+      if(e.key === 'ArrowDown'){ e.preventDefault(); links[(idx+1)%links.length].focus(); }
+      else if(e.key === 'ArrowUp'){ e.preventDefault(); links[(idx-1+links.length)%links.length].focus(); }
+      else if(e.key === 'Home'){ e.preventDefault(); links[0].focus(); }
+      else if(e.key === 'End'){ e.preventDefault(); links[links.length-1].focus(); }
+      else if(e.key === 'Escape'){ e.preventDefault(); closeAll(true); }
+      else if(e.key === 'Tab'){ closeAll(false); }
+    });
+
+    // choosing an item dismisses the menu
+    itemsOf(it).forEach(function(a){ a.addEventListener('click', function(){ closeMenu(it,false); }); });
+  });
+
+  var menubarEl = document.querySelector('.menubar');
+  if(menubarEl) menubarEl.addEventListener('mouseleave', function(){ hoverSwitched = false; });
+  document.addEventListener('click', function(e){
+    if(openItem && !openItem.contains(e.target)) closeAll(false);
+  });
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeAll(true); });
+
+  /* ---- mobile sheet ---- */
+  var burger = document.getElementById('burger');
+  var sheet  = document.getElementById('mobile-sheet');
+  if(burger && sheet){
+    burger.addEventListener('click', function(e){
+      e.stopPropagation();
+      var open = sheet.classList.toggle('open');
+      burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    sheet.addEventListener('click', function(e){
+      if(e.target.tagName === 'A'){ sheet.classList.remove('open'); burger.setAttribute('aria-expanded','false'); }
+    });
+    document.addEventListener('click', function(e){
+      if(!sheet.contains(e.target) && e.target !== burger){
+        sheet.classList.remove('open'); burger.setAttribute('aria-expanded','false');
+      }
+    });
+  }
+
+  /* ---- scroll spy: light the trigger whose menu owns the visible section ---- */
+  var secToTrigger = {};
+  mbItems.forEach(function(it){
+    var trig = it.querySelector('.mb-trigger');
+    itemsOf(it).forEach(function(a){
+      var h = a.getAttribute('href');
+      if(h && h.charAt(0) === '#') secToTrigger[h.slice(1)] = trig;
+    });
+  });
+  if('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(!en.isIntersecting) return;
+        mbItems.forEach(function(it){ it.querySelector('.mb-trigger').classList.remove('active'); });
+        var t = secToTrigger[en.target.id];
+        if(t) t.classList.add('active');
+      });
+    }, { rootMargin:'-74px 0px -60% 0px', threshold:0 });
+    ['pipeline','why','metrics','download','faq','contact'].forEach(function(id){
+      var el = document.getElementById(id); if(el) io.observe(el);
+    });
+  }
+})();
+</script>
+</body>
+</html>

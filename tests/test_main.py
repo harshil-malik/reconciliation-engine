@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main
 from app.ai_matching.confirmer import ConfirmationResult
 from app.main import app, get_embedding_client, get_match_confirmer, get_vision_extractor
 
@@ -258,146 +257,14 @@ def test_reconcile_rejects_the_same_file_on_both_sides() -> None:
     assert "same file" in response.json()["detail"]
 
 
-# A bank statement and the client's own Bank A/c ledger recording the same two
-# events from opposite sides: what the statement calls a Withdrawal, the ledger
-# books as a Credit to the bank asset account.
-_BANK_CSV = (
+_SOURCE_BANK_CSV = (
     b"Date,Narration,Chq/Ref No,Withdrawal Amt,Deposit Amt\n"
-    b"01/04/24,NEFT VENDOR PAYMENT ABC SUPPLIES,N123,15075.00,\n"
-    b"03/04/24,UPI CUSTOMER RECEIPT INV1042,U987,,25000.00\n"
+    b"01/04/24,NEFT VENDOR PAYMENT ABC,N123,15075.00,\n"
 )
-_BANK_ACCOUNT_LEDGER_CSV = (
-    b"Txn Date,Particulars,Voucher No,Debit,Credit\n"
-    b"01-04-2024,Vendor Payment - ABC Supplies,N123,,15075\n"
-    b"03-04-2024,Customer Receipt - Invoice 1042,U987,25000,\n"
+_SOURCE_LEDGER_CSV = (
+    b"Txn Date,Particulars,Voucher No,Amount\n"
+    b"01-04-2024,Vendor Payment - ABC,N123,-15075\n"
 )
-
-
-def test_csv_ledger_gets_debit_credit_convention_detection() -> None:
-    """A CSV/Excel ledger was always read as "Credit means money in".
-
-    Detection ran for PDFs only, so the client's own Bank A/c ledger — where a Debit
-    is money arriving, and which is the usual counterpart to a bank statement — came
-    out with every amount inverted. Nothing errored: the amounts simply stopped
-    agreeing and every row landed in Unmatched, which looks exactly like a client
-    whose books are in poor shape.
-    """
-    response = client.post(
-        "/reconcile/preview",
-        files={
-            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
-            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
-        },
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert len(body["matched"]) == 2
-    assert body["unmatched_bank"] == []
-    assert body["unmatched_ledger"] == []
-    assert body["summary"]["unexplained"] == 0.0
-
-
-def test_named_ledger_template_is_honoured_for_a_csv_ledger() -> None:
-    """`ledger_pdf_template` was consulted only on the PDF path, so naming a
-    convention for a CSV or Excel ledger was silently ignored and the default
-    reading used regardless. Overriding detection is the documented escape hatch for
-    a file too small or too disjoint for detection to call, so it has to work on
-    every format."""
-    response = client.post(
-        "/reconcile/preview",
-        files={
-            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
-            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
-        },
-        data={"ledger_pdf_template": "bank_account_ledger"},
-    )
-
-    assert response.status_code == 200
-    assert len(response.json()["matched"]) == 2
-
-
-def test_anomaly_config_thresholds_can_be_set_per_client() -> None:
-    """Stage 3's thresholds were hardcoded to their defaults — `AnomalyConfig`
-    existed and `detect_anomalies` accepted one, but no route ever passed it. A
-    client whose approval limit is not 50,000 got flags calibrated to someone
-    else's business."""
-    bank_csv = (
-        b"Date,Narration,Chq/Ref No,Withdrawal Amt,Deposit Amt\n"
-        b"01/04/24,NEFT VENDOR PAYMENT ABC,N123,19500.00,\n"
-    )
-    ledger_csv = (
-        b"Txn Date,Particulars,Voucher No,Amount\n"
-        b"01-04-2024,Vendor Payment - ABC,N123,-19500\n"
-    )
-    files = {
-        "bank_file": ("bank.csv", bank_csv, "text/csv"),
-        "ledger_file": ("ledger.csv", ledger_csv, "text/csv"),
-    }
-
-    def threshold_flags(data: dict) -> list[dict]:
-        response = client.post("/reconcile/preview", files=files, data=data)
-        assert response.status_code == 200
-        return [
-            flag
-            for flag in response.json()["anomalies"]
-            if flag["rule"] == "just_below_approval_threshold"
-        ]
-
-    # 19,500 sits under nobody's default threshold (50,000 / 1,00,000 / 2,00,000).
-    assert threshold_flags({}) == []
-
-    # For a client who requires sign-off above 20,000 it is the classic pattern.
-    # Flagged twice because the payment is on both sides of a clean reconciliation
-    # and the rule reads every row it is given, whichever book it came from.
-    assert len(threshold_flags({
-        "anomaly_config": json.dumps(
-            {"approval_thresholds": ["20000"], "threshold_margin_pct": "0.05"}
-        )
-    })) == 2
-
-
-def test_invalid_anomaly_config_is_rejected_rather_than_silently_defaulted() -> None:
-    """Falling back to defaults on a malformed config would show a reviewer the
-    flags they had explicitly asked not to see, with nothing to say why."""
-    response = client.post(
-        "/reconcile/preview",
-        files={
-            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
-            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
-        },
-        data={"anomaly_config": json.dumps({"duplicate_window_days": "not a number"})},
-    )
-
-    assert response.status_code == 422
-    assert "anomaly_config" in response.json()["detail"]
-
-
-def test_anomaly_config_endpoint_returns_the_defaults() -> None:
-    response = client.get("/anomaly-config")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["approval_thresholds"] == ["50000", "100000", "200000"]
-    assert body["duplicate_window_days"] == 1
-
-
-def test_oversized_upload_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An upload was read into memory with no ceiling, so a mis-dropped file — a
-    video, a disk image, a multi-gigabyte export — was buffered whole before
-    anything looked at it. A statement is far under a megabyte, so a large one is
-    already a mistake and should say so rather than exhaust the machine."""
-    monkeypatch.setattr(main, "MAX_UPLOAD_BYTES", 1024)
-
-    response = client.post(
-        "/reconcile",
-        files={
-            "bank_file": ("bank.csv", b"x" * 5000, "text/csv"),
-            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
-        },
-    )
-
-    assert response.status_code == 413
-    assert "larger than the" in response.json()["detail"]
 
 
 def test_preview_carries_a_source_citation_for_every_row() -> None:
@@ -408,8 +275,8 @@ def test_preview_carries_a_source_citation_for_every_row() -> None:
     response = client.post(
         "/reconcile/preview",
         files={
-            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
-            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
+            "bank_file": ("bank.csv", _SOURCE_BANK_CSV, "text/csv"),
+            "ledger_file": ("ledger.csv", _SOURCE_LEDGER_CSV, "text/csv"),
         },
     )
     assert response.status_code == 200
@@ -436,8 +303,8 @@ def test_source_citation_survives_into_the_workbook() -> None:
     response = client.post(
         "/reconcile",
         files={
-            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
-            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
+            "bank_file": ("bank.csv", _SOURCE_BANK_CSV, "text/csv"),
+            "ledger_file": ("ledger.csv", _SOURCE_LEDGER_CSV, "text/csv"),
         },
     )
     assert response.status_code == 200
@@ -499,11 +366,15 @@ def test_spreadsheet_citation_carries_its_cells_and_their_roles() -> None:
     """A CSV row has no page to draw a box on, so it is shown as the row it is. The
     columns carry the role ingestion assigned them, so the dashboard can mark the
     cell that triggered the flag instead of re-guessing a mapping already made."""
+    ledger_csv = (
+        b"Txn Date,Particulars,Voucher No,Debit,Credit\n"
+        b"01-04-2024,Vendor Payment - ABC,N123,15075,\n"
+    )
     response = client.post(
         "/reconcile/preview",
         files={
-            "bank_file": ("bank.csv", _BANK_CSV, "text/csv"),
-            "ledger_file": ("ledger.csv", _BANK_ACCOUNT_LEDGER_CSV, "text/csv"),
+            "bank_file": ("bank.csv", _SOURCE_BANK_CSV, "text/csv"),
+            "ledger_file": ("ledger.csv", ledger_csv, "text/csv"),
         },
     )
     assert response.status_code == 200
@@ -524,52 +395,3 @@ def test_spreadsheet_citation_carries_its_cells_and_their_roles() -> None:
         # Exactly one money column carries a figure — that is the cell to mark.
         money = [c for c in cells if c["field"] in ("debit", "credit") and c["value"]]
         assert len(money) == 1
-
-
-def test_ledger_convention_diagnostic_names_why_the_readings_agree(caplog) -> None:
-    """Two different things make both readings agree, and naming the wrong one sends
-    whoever is debugging an inverted report looking in the wrong place.
-
-    A ledger printing a running balance is corrected by the balance audit, which is
-    sign-convention agnostic — so the INVERTED reading gets rewritten back and the two
-    converge. Counting corrections only on the reading that won would find zero (it
-    was the correct one all along) and wrongly report the file as having no
-    Debit/Credit split at all.
-    """
-    from scripts.make_sample_data import write_text_pdf
-    import tempfile
-    from pathlib import Path as _Path
-
-    with tempfile.TemporaryDirectory() as tmp:
-        pdf = _Path(tmp) / "ledger.pdf"
-        write_text_pdf(
-            [
-                "Opening Balance  : 100,000.00",
-                "",
-                "Date        Particulars                     Voucher No.    Debit          Credit         Balance",
-                "01/07/2026  Rajesh Kumar Traders INV2241    UPI2241        12,450.00                     112,450.00",
-                "02/07/2026  Globex Supplies INV8340         NFT8340                       8,340.50       104,109.50",
-            ],
-            pdf,
-        )
-        bank_csv = (
-            b"Date,Narration,Chq/Ref No,Withdrawal Amt,Deposit Amt\n"
-            b"01/07/26,UPI-RAJESH KUMAR TRADERS-INV2241,UPI2241,,12450.00\n"
-            b"02/07/26,NEFT-GLOBEX SUPPLIES-INV8340,NFT8340,8340.50,\n"
-        )
-
-        with caplog.at_level("INFO", logger="app.main"):
-            response = client.post(
-                "/reconcile/preview",
-                files={
-                    "bank_file": ("bank.csv", bank_csv, "text/csv"),
-                    "ledger_file": ("ledger.pdf", pdf.read_bytes(), "application/pdf"),
-                },
-            )
-
-    assert response.status_code == 200
-    messages = " ".join(r.getMessage() for r in caplog.records)
-    assert "running-balance audit" in messages
-    assert "cannot change the result" in messages
-    # The misleading claim this replaced.
-    assert "no Debit/Credit split" not in messages

@@ -23,3 +23,8 @@ google-genai
 anthropic
 voyageai
 pytest
+# Desktop app: pywebview renders the UI in a native window (Edge WebView2 on
+# Windows); pyinstaller is build-time only, used by build_windows.ps1 to produce
+# the distributable zip. See README.md "Desktop app (Windows)".
+pywebview
+pyinstaller

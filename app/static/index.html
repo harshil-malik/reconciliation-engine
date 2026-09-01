@@ -5,14 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Reconciliation Engine</title>
 <style>
-  /* IBM Plex is served from this machine rather than Google Fonts. The whole point
-     of the local model setup is that nothing leaves the machine holding client
-     financial data, and a webfont request was the one thing still reaching the
-     internet — it would have told Google, on every page load, that someone was
-     using this tool. Licensed OFL-1.1; see fonts/OFL.txt.
-
-     Sans is a variable font covering 400-600 in a single file, so three weights
-     cost one request. Latin subset only: 50 KB for both faces. */
   @font-face {
     font-family: "IBM Plex Sans";
     font-style: normal;
@@ -29,459 +21,672 @@
   }
 
   :root {
-    --bg: #f6f7f9;
+    --bg: #f0f2f5;
     --surface: #ffffff;
-    --border: #dde1e6;
-    --border-hover: #85bb65;
-    --text: #1b1f23;
-    --text-muted: #5b6470;
-    --accent: #85bb65;
-    --accent-dark: #4a7132;
-    --accent-tint: #eef7e9;
-    --deep: #223715;
-    --deep-line: #3f5d2d;
+    --surface-2: #f8f9fb;
+    --border: #e2e6eb;
+    --text: #1a1d21;
+    --text-muted: #6b7280;
+    --text-subtle: #9ca3af;
+    --accent: #2f6f5e;
+    --accent-dark: #1c4a3d;
+    --accent-tint: #eaf3f0;
+    --deep: #14322a;
+    --deep-line: #2a4d43;
     --on-deep: #f4f7f5;
-    --on-deep-muted: #aabc9f;
-    --error-bg: #fdecec;
-    --error-text: #9c2b2b;
-    --error-border: #e4a9a9;
-    --warning-bg: #fdf3e2;
-    --warning-text: #8a5a12;
-    --warning-border: #e3b673;
-    --success-bg: #f1f8ed;
-    --success-text: #456a2f;
+    --on-deep-muted: #9fb8ae;
+    --error-bg: #fef2f2;
+    --error-text: #991b1b;
+    --error-border: #fca5a5;
+    --warning-bg: #fffbeb;
+    --warning-text: #92400e;
+    --warning-border: #fcd34d;
+    --success-bg: #f0fdf4;
+    --success-text: #166534;
+    --sidebar-w: 300px;
   }
 
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
-    margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   a { color: var(--accent); }
-  a:hover { color: var(--accent-dark); }
   button { font-family: inherit; cursor: pointer; }
   .mono { font-family: "IBM Plex Mono", monospace; }
 
-  /* ---------- client sidebar ----------
-     A CA carries many clients at once and returns to an engagement weeks later, so
-     the work has to be filed somewhere and found again. The sidebar is the index:
-     who this is for, and everything already run for them. */
+  /* ---------- model startup overlay ---------- */
 
-  :root { --sidebar-w: 268px; }
-
-  body { padding-left: var(--sidebar-w); }
-
-  #sidebar {
-    position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-w);
-    display: flex; flex-direction: column;
-    background: var(--panel, rgba(127,127,127,0.05));
-    border-right: 1px solid var(--border);
-    z-index: 20;
-  }
-  .sb-head { padding: 18px 16px 12px; border-bottom: 1px solid var(--border); }
-  .sb-title { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
-  .sb-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-
-  .sb-section { padding: 14px 16px 8px; }
-  .sb-label {
-    font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--text-muted); display: flex; justify-content: space-between; align-items: center;
-  }
-  .sb-add {
-    background: none; border: none; color: var(--accent); font-size: 16px; line-height: 1;
-    padding: 0 2px; cursor: pointer;
-  }
-  .sb-add:hover { color: var(--accent-dark); }
-
-  .client-list, .run-list { list-style: none; margin: 8px 0 0; padding: 0; }
-  .client-list li, .run-list li { margin-bottom: 2px; }
-
-  .client-row, .run-row {
-    width: 100%; text-align: left; background: none; border: 1px solid transparent;
-    border-radius: 6px; padding: 7px 9px; font-size: 12.5px; color: var(--text);
-    display: block;
-  }
-  .client-row:hover, .run-row:hover { background: rgba(127,127,127,0.10); }
-  .client-row.active, .run-row.active {
-    background: rgba(127,127,127,0.14); border-color: var(--border); font-weight: 500;
-  }
-  .client-row .count { float: right; color: var(--text-muted); font-size: 11px; font-weight: 400; }
-  .run-row .when { font-size: 12px; }
-  .run-row .stat { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
-  .run-row .flag { color: var(--error-text); font-weight: 600; }
-
-  .sb-runs { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
-  .sb-empty { font-size: 11.5px; color: var(--text-muted); padding: 8px 2px; line-height: 1.5; }
-
-  .sb-tools { display: flex; gap: 6px; margin-top: 10px; }
-  .sb-tool {
-    flex: 1; padding: 5px 6px; font-size: 11px; border-radius: 5px;
-    border: 1px solid var(--border); background: none; color: var(--text-muted);
-  }
-  .sb-tool:hover { background: rgba(127,127,127,0.10); color: var(--text); }
-  .sb-tool[disabled] { opacity: 0.4; cursor: not-allowed; }
-
-  .threshold-editor { margin-top: 8px; }
-  .threshold-editor textarea {
-    width: 100%; min-height: 132px; font-family: "IBM Plex Mono", monospace;
-    font-size: 10.5px; line-height: 1.45; padding: 7px; border-radius: 5px;
-    border: 1px solid var(--border); background: var(--bg); color: var(--text);
-    resize: vertical;
-  }
-  .threshold-note { font-size: 10.5px; color: var(--text-muted); margin: 5px 0; line-height: 1.45; }
-
-  .sb-foot { padding: 12px 16px; border-top: 1px solid var(--border); }
-  .sb-new {
-    width: 100%; padding: 8px; font-size: 12.5px; border-radius: 6px;
-    border: 1px solid var(--border); background: none; color: var(--text);
-  }
-  .sb-new:hover { background: rgba(127,127,127,0.10); }
-
-  @media (max-width: 860px) {
-    body { padding-left: 0; }
-    #sidebar { position: static; width: auto; height: auto; border-right: none;
-               border-bottom: 1px solid var(--border); }
-    .sb-runs { max-height: 220px; }
-  }
-
-  /* ---------- upload view ---------- */
-
-  #upload-view {
+  #model-loading {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
     display: flex;
+    align-items: center;
     justify-content: center;
-    padding: 64px 20px;
+    background: var(--deep);
+    color: var(--on-deep);
   }
-
-  #upload-view main {
-    width: 100%;
-    max-width: 780px;
-  }
-
-  .eyebrow {
-    font-size: 12px;
-    font-weight: 500;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 12px;
-  }
-
-  h1 {
-    font-size: 34px;
-    margin: 0 0 8px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-
-  #upload-view header p {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: 15px;
-    max-width: 520px;
-  }
-
-  .dropzones {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-top: 36px;
-  }
-
-  .dropzone {
-    flex: 1 1 300px;
-    background: var(--surface);
-    border: 1.5px dashed var(--border);
-    border-radius: 16px;
-    padding: 26px 20px;
+  #model-loading[hidden] { display: none; }
+  .ml-card {
+    max-width: 360px;
     text-align: center;
-    cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
+    padding: 0 2rem;
   }
-
-  .dropzone:hover,
-  .dropzone.dragover {
-    border-color: var(--border-hover);
-    background: var(--accent-tint);
-  }
-
-  .dropzone.has-file {
-    border-style: solid;
-    border-color: var(--accent);
-  }
-
-  .dropzone h2 {
-    font-size: 15px;
-    margin: 8px 0 6px;
-    font-weight: 600;
-  }
-
-  .dropzone .hint {
-    color: var(--text-muted);
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .dropzone .filename {
-    margin-top: 12px;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--accent-dark);
-    word-break: break-all;
-  }
-
-  .dropzone input[type="file"] { display: none; }
-
-  .template-row {
-    margin-top: 16px;
-    display: none;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .template-row.visible { display: flex; }
-
-  .template-row label {
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-  }
-
-  .template-row select {
-    flex: 1;
-    padding: 9px 12px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    font-size: 14px;
-    background: var(--surface);
-    font-family: inherit;
-  }
-
-  .actions {
-    margin-top: 32px;
+  .ml-logo {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: var(--accent);
     display: flex;
     align-items: center;
-    gap: 18px;
+    justify-content: center;
+    margin: 0 auto 20px;
   }
-
-  .btn-pill {
-    background: var(--accent);
-    color: white;
-    border: none;
+  .ml-card h2 { font-size: 1.2rem; margin-bottom: 8px; }
+  .ml-card p { color: var(--on-deep-muted); font-size: 13px; line-height: 1.6; margin-bottom: 24px; }
+  .ml-bar-track {
+    background: var(--deep-line);
     border-radius: 999px;
-    padding: 13px 28px;
-    font-size: 15px;
+    height: 4px;
+    overflow: hidden;
+  }
+  .ml-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    width: 0%;
+    transition: width 0.6s ease;
+    animation: ml-pulse 2s ease-in-out infinite;
+  }
+  @keyframes ml-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .ml-status { font-size: 11px; color: var(--on-deep-muted); margin-top: 10px; letter-spacing: 0.04em; }
+
+  /* ---------- top bar ---------- */
+
+  .topbar {
+    height: 52px;
+    background: var(--deep);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 12px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .topbar-logo {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .topbar-title {
+    font-size: 14px;
     font-weight: 600;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    transition: background 0.15s ease;
+    color: var(--on-deep);
+    letter-spacing: -0.01em;
+  }
+  .topbar-sub {
+    font-size: 11px;
+    color: var(--on-deep-muted);
+    margin-left: 4px;
+  }
+  .topbar-spacer { flex: 1; }
+  .ai-badge {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: rgba(47,111,94,0.35);
+    color: var(--on-deep-muted);
+    border-radius: 999px;
+    padding: 3px 10px;
   }
 
-  .btn-pill:disabled {
-    background: #b7c2bd;
-    cursor: not-allowed;
+  /* ---------- progress bar (reconciliation in-flight) ---------- */
+
+  #progress-bar {
+    height: 3px;
+    background: var(--border);
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+    display: none;
+  }
+  #progress-bar.active { display: block; }
+  .progress-fill {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    background: var(--accent);
+    border-radius: 0 999px 999px 0;
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+  .progress-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+    animation: shimmer 1.2s ease-in-out infinite;
+    display: none;
+  }
+  #progress-bar.active .progress-shimmer { display: block; }
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(300%); }
   }
 
-  .btn-pill:not(:disabled):hover { background: var(--accent-dark); }
+  /* ---------- main layout ---------- */
 
-  .btn-pill.small {
-    padding: 11px 22px;
-    font-size: 13px;
+  .layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
   }
 
-  .status { font-size: 13px; }
-  .status.error { color: var(--error-text); background: var(--error-bg); padding: 10px 14px; border-radius: 8px; display: inline-block; }
-  .status.success { color: var(--success-text); background: var(--success-bg); padding: 10px 14px; border-radius: 8px; display: inline-block; }
-  .status.loading { color: var(--text-muted); }
+  /* ---------- client rail ---------- */
 
-  #upload-view footer {
-    margin-top: 48px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border);
-    font-size: 12px;
-    color: var(--text-muted);
+  .client-rail {
+    width: 260px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
   }
 
-  /* ---------- results view ---------- */
-
-  #results-view { display: none; padding-bottom: 64px; }
-
-  .back-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    font-weight: 500;
-    text-decoration: none;
-    background: none;
-    border: none;
-    color: var(--accent);
-    padding: 0;
+  .client-rail-top {
+    flex-shrink: 0;
+    max-height: 46%;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
   }
 
-  .results-header {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 32px 20px 0;
+  .client-rail-bottom {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
-  .results-header .titles {
+  .rail-header {
+    padding: 16px 16px 10px;
+    flex-shrink: 0;
+  }
+
+  .rail-header-row {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 18px;
+    margin-bottom: 12px;
   }
-
-  .results-header h1 { font-size: 26px; margin: 0; }
-  .results-header .files { font-size: 12px; color: var(--text-muted); }
-
-  .proof-band {
-    background: var(--deep);
-    margin-top: 20px;
-  }
-
-  .proof-inner {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 32px 20px;
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr 1.4fr;
-    gap: 24px;
-    align-items: center;
-  }
-
-  .proof-label {
+  .rail-header-row .section-label { margin-bottom: 0; }
+  .history-client-name {
     font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .btn-new-client {
+    width: 100%;
+    background: var(--accent-tint);
+    color: var(--accent-dark);
+    border: 1px dashed var(--accent);
+    border-radius: 8px;
+    padding: 9px;
+    font-size: 12.5px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: background 0.15s;
+  }
+  .btn-new-client:hover { background: #ddeee7; }
+
+  .new-client-form[hidden] { display: none; }
+  .new-client-form {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .new-client-form input {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--accent);
+    font-size: 12.5px;
+    font-family: inherit;
+    color: var(--text);
+    outline: none;
+  }
+  .new-client-actions { display: flex; gap: 6px; }
+  .nc-btn {
+    flex: 1;
+    border: none;
+    border-radius: 7px;
+    padding: 7px;
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .nc-cancel { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .nc-save { background: var(--accent); color: white; }
+  .nc-save:hover { background: var(--accent-dark); }
+  .nc-error { font-size: 11px; color: var(--error-text); margin-top: 2px; }
+
+  .client-rail-list, .client-rail-history {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 8px 10px;
+  }
+
+  .client-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 8px;
+    padding: 8px 8px;
+    cursor: pointer;
+    font-size: 12.5px;
+    margin-bottom: 2px;
+    transition: background 0.12s;
+  }
+  .client-row:hover { background: var(--surface-2); }
+  .client-row.active { background: var(--accent-tint); }
+  .client-row.active .client-row-name { color: var(--accent-dark); font-weight: 600; }
+  .client-row-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: var(--border);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .client-row.active .client-row-avatar { background: var(--accent); color: white; }
+  .client-row-body { min-width: 0; flex: 1; }
+  .client-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .client-row-meta { font-size: 10.5px; color: var(--text-subtle); }
+  .client-row-delete {
+    opacity: 0;
+    background: none;
+    border: none;
+    padding: 4px;
+    border-radius: 6px;
+    color: var(--text-subtle);
+    flex-shrink: 0;
+    transition: opacity 0.12s, background 0.12s, color 0.12s;
+  }
+  .client-row:hover .client-row-delete { opacity: 1; }
+  .client-row-delete:hover { background: var(--error-bg); color: var(--error-text); }
+
+  .rail-empty {
+    font-size: 12px;
+    color: var(--text-subtle);
+    padding: 6px 8px 12px;
+    line-height: 1.5;
+  }
+
+  .history-row {
+    border-radius: 8px;
+    padding: 9px 10px;
+    cursor: pointer;
+    margin-bottom: 4px;
+    border: 1px solid transparent;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .history-row:hover { background: var(--surface-2); }
+  .history-row.active { background: var(--accent-tint); border-color: var(--accent); }
+  .history-row-date { font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }
+  .history-row-files {
+    font-size: 12px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 4px;
+  }
+  .history-row-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .hr-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--text-muted);
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .hr-badge.flag { background: var(--warning-bg); color: var(--warning-text); }
+
+  .history-banner {
+    background: var(--accent-tint);
+    color: var(--accent-dark);
+    font-size: 12px;
+    padding: 8px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .history-banner .hb-spacer { flex: 1; }
+  .history-banner button {
+    background: none;
+    border: none;
+    color: var(--accent-dark);
+    font-size: 11.5px;
+    font-weight: 600;
+    text-decoration: underline;
+    padding: 0;
+  }
+  .history-banner .hb-delete { color: var(--error-text); }
+
+  /* ---------- sidebar ---------- */
+
+  .sidebar {
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  .sidebar-section {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-label {
+    font-size: 10px;
+    font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--on-deep-muted);
-    margin-bottom: 8px;
+    color: var(--text-subtle);
+    margin-bottom: 12px;
   }
 
-  .proof-value { font-size: 22px; font-weight: 600; color: var(--on-deep); }
-  .proof-sub { font-size: 12px; color: var(--on-deep-muted); margin-top: 2px; }
-
-  .unexplained-cell {
-    border-left: 1px solid var(--deep-line);
-    padding-left: 24px;
+  /* drop zones */
+  .dropzone {
+    background: var(--surface-2);
+    border: 1.5px dashed var(--border);
+    border-radius: 12px;
+    padding: 16px 14px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: 10px;
     display: flex;
     align-items: center;
+    gap: 12px;
+  }
+  .dropzone:last-of-type { margin-bottom: 0; }
+  .dropzone:hover, .dropzone.dragover {
+    border-color: var(--accent);
+    background: var(--accent-tint);
+  }
+  .dropzone.has-file {
+    border-style: solid;
+    border-color: var(--accent);
+    background: var(--accent-tint);
+  }
+  .dz-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  .dropzone.has-file .dz-icon { background: var(--accent); }
+  .dropzone.has-file .dz-icon svg path, .dropzone.has-file .dz-icon svg polyline { stroke: white; }
+  .dz-text { min-width: 0; }
+  .dz-label { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .dz-hint { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dropzone input[type="file"] { display: none; }
+
+  /* template selects */
+  .template-row { display: none; flex-direction: column; gap: 4px; margin-top: 10px; }
+  .template-row.visible { display: flex; }
+  .template-row label { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-subtle); }
+  .template-row select {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    background: var(--surface);
+    font-family: inherit;
+    color: var(--text);
+  }
+
+  /* run button */
+  .sidebar-action { padding: 16px 20px; }
+
+  .btn-run {
+    width: 100%;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 13px;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.15s, transform 0.1s;
+  }
+  .btn-run:disabled { background: #c5cfc8; cursor: not-allowed; }
+  .btn-run:not(:disabled):hover { background: var(--accent-dark); }
+  .btn-run:not(:disabled):active { transform: scale(0.98); }
+
+  .run-status {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 10px;
+    min-height: 18px;
+  }
+  .run-status.error { color: var(--error-text); }
+
+  /* summary stats in sidebar */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat-cell {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .stat-cell.wide { grid-column: 1 / -1; }
+  .stat-cell-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-subtle); margin-bottom: 4px; }
+  .stat-cell-value { font-size: 15px; font-weight: 600; }
+  .stat-cell-value.mono { font-size: 14px; }
+  .stat-cell-sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+  .balanced { color: var(--success-text); }
+  .unbalanced { color: var(--error-text); }
+
+  .sidebar-footer {
+    margin-top: auto;
+    padding: 16px 20px;
+    font-size: 11px;
+    color: var(--text-subtle);
+    line-height: 1.5;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ---------- main panel ---------- */
+
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* empty state */
+  #empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     gap: 14px;
+    color: var(--text-muted);
+    padding: 40px;
   }
+  #empty-state svg { opacity: 0.18; }
+  #empty-state h2 { font-size: 18px; color: var(--text); font-weight: 600; }
+  #empty-state p { font-size: 13px; color: var(--text-muted); text-align: center; max-width: 320px; line-height: 1.6; }
 
-  .unexplained-value {
-    font-size: 34px;
-    font-weight: 500;
-    letter-spacing: -0.02em;
-  }
+  /* results panel */
+  #results-panel { display: none; flex-direction: column; overflow: hidden; flex: 1; }
+  #results-panel.active { display: flex; }
 
-  .tabs-row {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 0 20px;
+  .tabs-bar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--border);
-    margin-top: 8px;
+    padding: 0 20px;
+    gap: 0;
+    flex-shrink: 0;
   }
-
-  .tabs { display: flex; gap: 32px; }
 
   .tab-btn {
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    padding: 14px 0;
-    font-size: 14px;
+    padding: 14px 14px;
+    font-size: 13px;
     color: var(--text-muted);
     font-weight: 500;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    white-space: nowrap;
+    transition: color 0.15s;
   }
-
   .tab-btn.active { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
-
   .tab-badge {
-    font-size: 11px;
-    padding: 1px 7px;
+    font-size: 10px;
+    padding: 1px 6px;
     border-radius: 999px;
     background: var(--bg);
     color: var(--text-muted);
+    font-family: "IBM Plex Mono", monospace;
   }
-
   .tab-btn.active .tab-badge { background: var(--accent-tint); color: var(--accent-dark); }
 
-  .tab-panel { max-width: 1280px; margin: 20px auto 0; padding: 0 20px; display: none; }
+  .tabs-spacer { flex: 1; }
+  .btn-download {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s;
+  }
+  .btn-download:hover { background: var(--accent-dark); }
+
+  .tab-panels {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .tab-panel { display: none; }
   .tab-panel.active { display: block; }
 
+  /* pair cards */
   .pair-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 20px;
-    margin-bottom: 10px;
-  }
-
-  .pair-row {
-    display: grid;
-    grid-template-columns: 90px 1fr 130px 210px;
-    gap: 12px;
-    font-size: 13px;
-    align-items: center;
-  }
-
-  .pair-row.bank { padding-bottom: 10px; }
-  .pair-row.ledger { padding-top: 10px; border-top: 1px dashed var(--border); }
-
-  .side-tag {
-    font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 4px;
-    margin-right: 8px;
-  }
-
-  .side-tag.bank { color: var(--accent-dark); background: var(--accent-tint); }
-  .side-tag.ledger { color: var(--text-muted); background: var(--bg); }
-
-  .reasoning {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-style: italic;
-    border-top: 1px solid var(--border);
-    padding-top: 10px;
-    margin-top: 2px;
-  }
-
-  .unmatched-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-
-  .unmatched-col-label {
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    margin-bottom: 10px;
-  }
-
-  .unmatched-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 14px 16px;
     margin-bottom: 8px;
   }
+  .pair-row {
+    display: grid;
+    grid-template-columns: 82px 1fr 120px 180px;
+    gap: 10px;
+    font-size: 12px;
+    align-items: center;
+  }
+  .pair-row.bank { padding-bottom: 10px; }
+  .pair-row.ledger { padding-top: 10px; border-top: 1px dashed var(--border); }
+  .side-tag {
+    font-size: 9px;
+    padding: 2px 5px;
+    border-radius: 4px;
+    margin-right: 6px;
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 600;
+  }
+  .side-tag.bank { color: var(--accent-dark); background: var(--accent-tint); }
+  .side-tag.ledger { color: var(--text-muted); background: var(--bg); }
+  .reasoning {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    margin-top: 4px;
+  }
 
-  .unmatched-card .top-row { display: flex; justify-content: space-between; font-size: 13px; }
-  .unmatched-card .desc { font-size: 13px; margin: 4px 0 6px; }
-  .unmatched-card .reason { font-size: 12px; color: var(--text-muted); }
+  .unmatched-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .unmatched-col-label {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .unmatched-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 6px;
+  }
+  .unmatched-card .top-row { display: flex; justify-content: space-between; font-size: 12px; }
+  .unmatched-card .desc { font-size: 12px; margin: 4px 0 4px; }
+  .unmatched-card .reason { font-size: 11px; color: var(--text-muted); }
 
   /* Source grounding: every flagged row opens onto the line of the uploaded file
      that produced it. In audit an unsourced figure is worth little — a reviewer has
@@ -503,7 +708,7 @@
   .source-loc { font-weight: 600; color: var(--text); }
   .source-text {
     font-size: 11.5px; line-height: 1.5; white-space: pre; overflow-x: auto;
-    background: var(--code-bg, rgba(127,127,127,0.09));
+    background: rgba(127,127,127,0.09);
     border: 1px solid var(--border); border-radius: 4px; padding: 7px 9px; margin: 0;
   }
   .source-missing { font-size: 12px; color: var(--text-muted); font-style: italic; }
@@ -544,9 +749,7 @@
     background: rgba(255, 92, 0, 0.22); outline: 2px solid rgba(220, 70, 0, 0.9);
     outline-offset: -2px; font-weight: 600;
   }
-  .source-rule {
-    font-size: 11px; color: var(--text-muted); margin-bottom: 8px;
-  }
+  .source-rule { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
   .source-rule b { color: var(--text); font-weight: 600; }
   /* The printed figure and the figure used disagree exactly where the running-balance
      audit corrected a misread. That is the engine showing its working, so it is
@@ -560,216 +763,289 @@
 
   .anomaly-card {
     border-radius: 10px;
-    padding: 14px 18px;
-    margin-bottom: 10px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
     border: 1px solid;
     border-left-width: 4px;
   }
-
   .anomaly-card.severity-red { background: var(--error-bg); border-color: var(--error-border); border-left-color: var(--error-text); }
   .anomaly-card.severity-amber { background: var(--warning-bg); border-color: var(--warning-border); border-left-color: var(--warning-text); }
-
-  .anomaly-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-  .anomaly-rule { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 500; }
+  .anomaly-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .anomaly-rule { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 600; font-family: "IBM Plex Mono", monospace; }
   .severity-red .anomaly-rule { color: var(--error-text); }
   .severity-amber .anomaly-rule { color: var(--warning-text); }
-  .anomaly-amount { font-size: 13px; font-weight: 600; }
-  .anomaly-reason { font-size: 13px; }
+  .anomaly-amount { font-size: 12px; font-weight: 600; }
+  .anomaly-reason { font-size: 12px; }
 
-  .empty-state { font-size: 13px; color: var(--text-muted); padding: 24px 0; }
+  .review-group { margin-bottom: 24px; }
+  .review-group-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 4px; font-family: "IBM Plex Mono", monospace; }
+  .review-group-hint { font-size: 11px; color: var(--text-subtle); margin-bottom: 10px; }
+
+  .empty-panel { font-size: 12px; color: var(--text-muted); padding: 20px 0; }
 </style>
 </head>
 <body>
 
-<aside id="sidebar">
-  <div class="sb-head">
-    <div class="sb-title">Reconciliation Engine</div>
-    <div class="sb-sub" id="sb-context">No client selected</div>
-  </div>
-
-  <div class="sb-section">
-    <div class="sb-label">Clients <button class="sb-add" id="add-client" title="Add a client">+</button></div>
-    <ul class="client-list" id="client-list"></ul>
-  </div>
-
-  <div class="sb-section" style="padding-top:8px;">
-    <div class="sb-tools">
-      <button class="sb-tool" id="client-thresholds" disabled>Thresholds</button>
-      <button class="sb-tool" id="client-export" disabled>Export</button>
+<!-- Model startup overlay -->
+<div id="model-loading" hidden>
+  <div class="ml-card">
+    <div class="ml-logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
     </div>
-    <details class="threshold-editor" id="threshold-panel" style="display:none;">
-      <summary style="display:none;"></summary>
-      <div class="threshold-note" id="threshold-state"></div>
-      <textarea id="threshold-json" spellcheck="false"></textarea>
-      <div class="sb-tools">
-        <button class="sb-tool" id="threshold-save">Save</button>
-        <button class="sb-tool" id="threshold-reset">Use defaults</button>
+    <h2>Starting up…</h2>
+    <p>Loading the local AI models onto the GPU. This takes a few moments and runs entirely on this machine — nothing leaves it.</p>
+    <div class="ml-bar-track">
+      <div class="ml-bar-fill" id="ml-bar"></div>
+    </div>
+    <div class="ml-status" id="ml-status">Initialising…</div>
+  </div>
+</div>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="topbar-logo">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <span class="topbar-title">Reconciliation Engine</span>
+  <span class="topbar-sub">for Chartered Accountants</span>
+  <div class="topbar-spacer"></div>
+  <div class="ai-badge">AI · Offline</div>
+</div>
+
+<!-- Reconciliation progress bar -->
+<div id="progress-bar">
+  <div class="progress-fill" id="progress-fill"></div>
+  <div class="progress-shimmer"></div>
+</div>
+
+<!-- Main layout -->
+<div class="layout">
+
+  <!-- Client rail -->
+  <aside class="client-rail">
+    <div class="client-rail-top">
+      <div class="rail-header">
+        <div class="rail-header-row">
+          <div class="section-label">Clients</div>
+        </div>
+        <button class="btn-new-client" id="new-client-btn">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+          New client
+        </button>
+        <div class="new-client-form" id="new-client-form" hidden>
+          <input type="text" id="new-client-name" placeholder="Client name" maxlength="120" />
+          <div class="new-client-actions">
+            <button class="nc-btn nc-cancel" id="new-client-cancel">Cancel</button>
+            <button class="nc-btn nc-save" id="new-client-save">Add</button>
+          </div>
+          <div class="nc-error" id="new-client-error"></div>
+        </div>
       </div>
-    </details>
-  </div>
+      <div class="client-rail-list" id="client-list"></div>
+    </div>
 
-  <div class="sb-section" style="padding-bottom:4px;">
-    <div class="sb-label">History</div>
-  </div>
-  <div class="sb-runs"><ul class="run-list" id="run-list"></ul></div>
+    <div class="client-rail-bottom">
+      <div class="rail-header">
+        <div class="rail-header-row">
+          <div class="section-label">History</div>
+          <div class="history-client-name" id="history-client-name"></div>
+        </div>
+      </div>
+      <div class="client-rail-history" id="history-list">
+        <div class="rail-empty">Select a client to see their past reconciliations.</div>
+      </div>
+    </div>
+  </aside>
 
-  <div class="sb-foot">
-    <button class="sb-new" id="sb-new-run">New reconciliation</button>
-  </div>
-</aside>
+  <!-- Sidebar -->
+  <aside class="sidebar">
 
-<div id="upload-view">
-  <main>
-    <header>
-      <div class="eyebrow">Step 1 — Ingest</div>
-      <h1>Reconciliation Engine</h1>
-      <p>Drop your bank statement and internal ledger below to generate an audit-ready reconciliation report.</p>
-    </header>
+    <div class="sidebar-section">
+      <div class="section-label">Documents</div>
 
-    <div class="dropzones">
-      <div class="dropzone" id="bank-zone" data-role="bank">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="margin: 0 auto; display: block;">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#5b6470" stroke-width="1.6" stroke-linejoin="round"/>
-          <path d="M14 2v6h6" stroke="#5b6470" stroke-width="1.6" stroke-linejoin="round"/>
-        </svg>
-        <h2>Bank Statement</h2>
-        <div class="hint">CSV, Excel, or PDF<br />Drop file or click to browse</div>
-        <div class="filename" id="bank-filename"></div>
+      <div class="dropzone" id="bank-zone">
+        <div class="dz-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#6b7280" stroke-width="1.8" stroke-linejoin="round"/>
+            <polyline points="14 2 14 8 20 8" stroke="#6b7280" stroke-width="1.8" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="dz-text">
+          <div class="dz-label">Bank Statement</div>
+          <div class="dz-hint" id="bank-hint">CSV, Excel or PDF</div>
+        </div>
         <input type="file" id="bank-input" accept=".csv,.xlsx,.xls,.pdf" />
       </div>
 
-      <div class="dropzone" id="ledger-zone" data-role="ledger">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="margin: 0 auto; display: block;">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#5b6470" stroke-width="1.6" stroke-linejoin="round"/>
-          <path d="M14 2v6h6" stroke="#5b6470" stroke-width="1.6" stroke-linejoin="round"/>
-        </svg>
-        <h2>Internal Ledger</h2>
-        <div class="hint">CSV, Excel, or PDF<br />Drop file or click to browse</div>
-        <div class="filename" id="ledger-filename"></div>
+      <div class="dropzone" id="ledger-zone">
+        <div class="dz-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#6b7280" stroke-width="1.8" stroke-linejoin="round"/>
+            <polyline points="14 2 14 8 20 8" stroke="#6b7280" stroke-width="1.8" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="dz-text">
+          <div class="dz-label">Internal Ledger</div>
+          <div class="dz-hint" id="ledger-hint">CSV, Excel or PDF</div>
+        </div>
         <input type="file" id="ledger-input" accept=".csv,.xlsx,.xls,.pdf" />
       </div>
-    </div>
 
-    <div class="template-row" id="bank-template-row">
-      <label for="bank-template-select">Bank template</label>
-      <select id="bank-template-select"></select>
-    </div>
-
-    <div class="template-row" id="ledger-template-row">
-      <label for="ledger-template-select">Ledger template</label>
-      <select id="ledger-template-select"></select>
-    </div>
-
-    <div class="actions">
-      <button class="btn-pill" id="reconcile" disabled>Generate Report</button>
-      <div class="status" id="status"></div>
-    </div>
-
-    <footer>Runs entirely on this machine — no data leaves it. Results appear here and export as a seven-tab .xlsx workbook.</footer>
-  </main>
-</div>
-
-<div id="results-view">
-  <div class="results-header">
-    <button class="back-link" id="new-reconciliation">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      New reconciliation
-    </button>
-    <div class="titles">
-      <h1>Reconciliation Results</h1>
-      <div class="files mono" id="results-filenames"></div>
-    </div>
-  </div>
-
-  <div class="proof-band">
-    <div class="proof-inner">
-      <div>
-        <div class="proof-label">Bank transactions</div>
-        <div class="proof-value" id="stat-bank-total"></div>
-        <div class="proof-sub" id="stat-bank-count"></div>
+      <div class="template-row" id="bank-template-row">
+        <label for="bank-template-select">Bank format</label>
+        <select id="bank-template-select"></select>
       </div>
-      <div>
-        <div class="proof-label">Ledger transactions</div>
-        <div class="proof-value" id="stat-ledger-total"></div>
-        <div class="proof-sub" id="stat-ledger-count"></div>
+      <div class="template-row" id="ledger-template-row">
+        <label for="ledger-template-select">Ledger format</label>
+        <select id="ledger-template-select"></select>
       </div>
-      <div>
-        <div class="proof-label">Difference</div>
-        <div class="proof-value" id="stat-difference"></div>
-        <div class="proof-sub">bank net less ledger net</div>
-      </div>
-      <div class="unexplained-cell">
-        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" style="flex-shrink: 0;" id="unexplained-icon">
-          <circle cx="12" cy="12" r="10" stroke="#9ecf81" stroke-width="1.8"/>
-          <path d="M8 12.5l2.5 2.5L16 9.5" stroke="#9ecf81" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </div>
+
+    <div class="sidebar-action">
+      <button class="btn-run" id="reconcile" disabled>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <circle cx="11" cy="11" r="8" stroke="white" stroke-width="2"/>
+          <path d="M21 21l-4.35-4.35" stroke="white" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <div>
-          <div class="proof-label">Unexplained</div>
-          <div class="unexplained-value mono" id="stat-unexplained"></div>
+        Run Reconciliation
+      </button>
+      <div class="run-status" id="run-status"></div>
+    </div>
+
+    <div class="sidebar-section" id="stats-section" style="display:none;">
+      <div class="section-label">Summary</div>
+      <div class="stat-grid">
+        <div class="stat-cell">
+          <div class="stat-cell-label">Bank</div>
+          <div class="stat-cell-value mono" id="stat-bank-total">—</div>
+          <div class="stat-cell-sub" id="stat-bank-count"></div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-cell-label">Ledger</div>
+          <div class="stat-cell-value mono" id="stat-ledger-total">—</div>
+          <div class="stat-cell-sub" id="stat-ledger-count"></div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-cell-label">Difference</div>
+          <div class="stat-cell-value mono" id="stat-difference">—</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-cell-label">Unexplained</div>
+          <div class="stat-cell-value mono" id="stat-unexplained">—</div>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="tabs-row">
-    <div class="tabs">
-      <button class="tab-btn active" data-tab="matched">Matched <span class="tab-badge mono" id="badge-matched">0</span></button>
-      <button class="tab-btn" data-tab="review">Needs Review <span class="tab-badge mono" id="badge-review">0</span></button>
-      <button class="tab-btn" data-tab="ai">AI Matched <span class="tab-badge mono" id="badge-ai">0</span></button>
-      <button class="tab-btn" data-tab="unmatched">Unmatched <span class="tab-badge mono" id="badge-unmatched">0</span></button>
-      <button class="tab-btn" data-tab="anomalies">Anomalies <span class="tab-badge mono" id="badge-anomalies">0</span></button>
+    <div class="sidebar-footer">
+      Runs entirely on this machine.<br/>No data leaves it.
     </div>
-    <button class="btn-pill small" id="download-xlsx">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v13m0 0l-5-5m5 5l5-5M4 20h16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Download .xlsx
-    </button>
-  </div>
+  </aside>
 
-  <div class="tab-panel active" id="panel-matched"></div>
-  <div class="tab-panel" id="panel-review"></div>
-  <div class="tab-panel" id="panel-ai"></div>
-  <div class="tab-panel" id="panel-unmatched"></div>
-  <div class="tab-panel" id="panel-anomalies"></div>
+  <!-- Main panel -->
+  <main class="main">
+
+    <div id="empty-state">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
+        <path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8" stroke="#1a1d21" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <h2>No reconciliation yet</h2>
+      <p>Upload a bank statement and internal ledger on the left, then click Run Reconciliation to generate your report.</p>
+    </div>
+
+    <div id="results-panel">
+      <div class="history-banner" id="history-banner" style="display:none;">
+        <span id="history-banner-text"></span>
+        <div class="hb-spacer"></div>
+        <button class="hb-delete" id="history-banner-delete">Delete this run</button>
+      </div>
+      <div class="tabs-bar">
+        <button class="tab-btn active" data-tab="matched">Matched <span class="tab-badge" id="badge-matched">0</span></button>
+        <button class="tab-btn" data-tab="review">Needs Review <span class="tab-badge" id="badge-review">0</span></button>
+        <button class="tab-btn" data-tab="ai">AI Matched <span class="tab-badge" id="badge-ai">0</span></button>
+        <button class="tab-btn" data-tab="unmatched">Unmatched <span class="tab-badge" id="badge-unmatched">0</span></button>
+        <button class="tab-btn" data-tab="anomalies">Anomalies <span class="tab-badge" id="badge-anomalies">0</span></button>
+        <div class="tabs-spacer"></div>
+        <button class="btn-download" id="download-xlsx">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3v13m0 0l-4-4m4 4l4-4M4 20h16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Download .xlsx
+        </button>
+      </div>
+      <div class="tab-panels">
+        <div class="tab-panel active" id="panel-matched"></div>
+        <div class="tab-panel" id="panel-review"></div>
+        <div class="tab-panel" id="panel-ai"></div>
+        <div class="tab-panel" id="panel-unmatched"></div>
+        <div class="tab-panel" id="panel-anomalies"></div>
+      </div>
+    </div>
+
+  </main>
 </div>
 
 <script>
   const state = {
     bank: null, ledger: null, bankTemplate: null, ledgerTemplate: null, result: null,
-    // Which client this work is filed under, which stored run is on screen, and the
-    // filenames of that run — a run reopened from history has no File objects behind
-    // it, so its header cannot read them off the upload boxes.
-    clientId: null, runId: null, storedFiles: null, documentsPurged: false,
+    clientId: null, clients: [], historyRuns: [], viewingRunId: null, documentsPurged: false,
   };
+  const CLIENT_KEY = "reconciliation.clientId";
 
-  const bankZone = document.getElementById("bank-zone");
-  const ledgerZone = document.getElementById("ledger-zone");
-  const bankInput = document.getElementById("bank-input");
-  const ledgerInput = document.getElementById("ledger-input");
-  const bankFilenameEl = document.getElementById("bank-filename");
-  const ledgerFilenameEl = document.getElementById("ledger-filename");
-  const bankTemplateRow = document.getElementById("bank-template-row");
-  const bankTemplateSelect = document.getElementById("bank-template-select");
-  const ledgerTemplateRow = document.getElementById("ledger-template-row");
-  const ledgerTemplateSelect = document.getElementById("ledger-template-select");
-  const reconcileBtn = document.getElementById("reconcile");
-  const statusEl = document.getElementById("status");
+  // ---------- progress bar ----------
+
+  let _progressInterval = null;
+  let _progressValue = 0;
+
+  function startProgress() {
+    const bar = document.getElementById("progress-bar");
+    const fill = document.getElementById("progress-fill");
+    bar.classList.add("active");
+    _progressValue = 0;
+    fill.style.width = "0%";
+    // Advance quickly to 30%, then slow to 85%, then stall — real completion snaps to 100%.
+    _progressInterval = setInterval(() => {
+      if (_progressValue < 30) _progressValue += 2;
+      else if (_progressValue < 85) _progressValue += 0.3;
+      fill.style.width = _progressValue + "%";
+    }, 200);
+  }
+
+  function finishProgress(ok) {
+    clearInterval(_progressInterval);
+    const fill = document.getElementById("progress-fill");
+    fill.style.transition = "width 0.3s ease";
+    fill.style.width = "100%";
+    fill.style.background = ok ? "var(--accent)" : "var(--error-text)";
+    setTimeout(() => {
+      document.getElementById("progress-bar").classList.remove("active");
+      fill.style.width = "0%";
+      fill.style.background = "var(--accent)";
+      fill.style.transition = "width 0.4s ease";
+    }, 600);
+  }
+
+  // ---------- helpers ----------
 
   function extensionOf(filename) {
     const parts = filename.toLowerCase().split(".");
     return parts.length > 1 ? "." + parts[parts.length - 1] : "";
   }
 
-  function setStatus(kind, message) {
-    statusEl.className = "status" + (kind ? " " + kind : "");
-    statusEl.textContent = message || "";
+  function setRunStatus(kind, message) {
+    const el = document.getElementById("run-status");
+    el.className = "run-status" + (kind ? " " + kind : "");
+    el.textContent = message || "";
   }
 
   function updateReconcileEnabled() {
     const bankNeedsTemplate = state.bank && extensionOf(state.bank.name) === ".pdf";
     const ledgerNeedsTemplate = state.ledger && extensionOf(state.ledger.name) === ".pdf";
-    reconcileBtn.disabled = !(
-      state.bank &&
-      state.ledger &&
+    document.getElementById("reconcile").disabled = !(
+      state.bank && state.ledger &&
       (!bankNeedsTemplate || state.bankTemplate) &&
       (!ledgerNeedsTemplate || state.ledgerTemplate)
     );
@@ -778,29 +1054,24 @@
   function setFile(role, file) {
     if (!file) return;
     const ext = extensionOf(file.name);
-    const allowed = [".csv", ".xlsx", ".xls", ".pdf"];
-    if (!allowed.includes(ext)) {
-      setStatus("error", `Unsupported file type "${ext}" for ${role === "bank" ? "bank statement" : "ledger"}.`);
+    if (![".csv", ".xlsx", ".xls", ".pdf"].includes(ext)) {
+      setRunStatus("error", `Unsupported type "${ext}"`);
       return;
     }
-    setStatus("");
-
+    setRunStatus("", "");
+    const short = file.name.length > 28 ? file.name.slice(0, 25) + "…" : file.name;
     if (role === "bank") {
       state.bank = file;
-      bankFilenameEl.textContent = file.name;
-      bankZone.classList.add("has-file");
-      bankTemplateRow.classList.toggle("visible", ext === ".pdf");
+      document.getElementById("bank-hint").textContent = short;
+      document.getElementById("bank-zone").classList.add("has-file");
+      document.getElementById("bank-template-row").classList.toggle("visible", ext === ".pdf");
       if (ext !== ".pdf") state.bankTemplate = null;
     } else {
       state.ledger = file;
-      ledgerFilenameEl.textContent = file.name;
-      ledgerZone.classList.add("has-file");
-      // Shown for spreadsheet ledgers too, not only PDFs: a CSV or Excel export
-      // carries the same ambiguous Debit/Credit convention, and the server now
-      // honours an explicit choice on every format. Left blank it auto-detects,
-      // which is the safe default — this is the override for a ledger too small or
-      // too disjoint from the statement for detection to call.
-      ledgerTemplateRow.classList.add("visible");
+      document.getElementById("ledger-hint").textContent = short;
+      document.getElementById("ledger-zone").classList.add("has-file");
+      document.getElementById("ledger-template-row").classList.toggle("visible", ext === ".pdf");
+      if (ext !== ".pdf") state.ledgerTemplate = null;
     }
     updateReconcileEnabled();
   }
@@ -808,39 +1079,17 @@
   function wireDropzone(zone, input, role) {
     zone.addEventListener("click", () => input.click());
     input.addEventListener("change", () => setFile(role, input.files[0]));
-
-    ["dragover", "dragenter"].forEach((evt) =>
-      zone.addEventListener(evt, (e) => {
-        e.preventDefault();
-        zone.classList.add("dragover");
-      })
-    );
-    ["dragleave", "dragend"].forEach((evt) =>
-      zone.addEventListener(evt, () => zone.classList.remove("dragover"))
-    );
-    zone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      zone.classList.remove("dragover");
-      if (e.dataTransfer.files.length) setFile(role, e.dataTransfer.files[0]);
-    });
+    ["dragover", "dragenter"].forEach(e => zone.addEventListener(e, ev => { ev.preventDefault(); zone.classList.add("dragover"); }));
+    ["dragleave", "dragend"].forEach(e => zone.addEventListener(e, () => zone.classList.remove("dragover")));
+    zone.addEventListener("drop", e => { e.preventDefault(); zone.classList.remove("dragover"); if (e.dataTransfer.files.length) setFile(role, e.dataTransfer.files[0]); });
   }
 
-  wireDropzone(bankZone, bankInput, "bank");
-  wireDropzone(ledgerZone, ledgerInput, "ledger");
+  wireDropzone(document.getElementById("bank-zone"), document.getElementById("bank-input"), "bank");
+  wireDropzone(document.getElementById("ledger-zone"), document.getElementById("ledger-input"), "ledger");
 
-  bankTemplateSelect.addEventListener("change", () => {
-    state.bankTemplate = bankTemplateSelect.value || null;
-    updateReconcileEnabled();
-  });
+  document.getElementById("bank-template-select").addEventListener("change", function() { state.bankTemplate = this.value || null; updateReconcileEnabled(); });
+  document.getElementById("ledger-template-select").addEventListener("change", function() { state.ledgerTemplate = this.value || null; updateReconcileEnabled(); });
 
-  ledgerTemplateSelect.addEventListener("change", () => {
-    state.ledgerTemplate = ledgerTemplateSelect.value || null;
-    updateReconcileEnabled();
-  });
-
-  // Choosing the wrong ledger convention inverts every amount in the file and fails
-  // silently — almost nothing reconciles, with no error to explain why. So these are
-  // spelled out rather than shown as raw template ids.
   const TEMPLATE_LABELS = {
     hdfc: "HDFC Bank statement",
     auto: "Auto-detect Debit/Credit (recommended)",
@@ -850,57 +1099,40 @@
 
   async function loadTemplates(endpoint, selectEl, placeholder) {
     try {
-      const response = await fetch(endpoint);
-      const data = await response.json();
-      selectEl.innerHTML =
-        `<option value="">${placeholder}</option>` +
-        data.templates
-          .map((t) => `<option value="${t}">${TEMPLATE_LABELS[t] || t.toUpperCase()}</option>`)
-          .join("");
-    } catch (err) {
-      selectEl.innerHTML = `<option value="">Could not load templates</option>`;
-    }
+      const data = await (await fetch(endpoint)).json();
+      selectEl.innerHTML = `<option value="">${placeholder}</option>` +
+        data.templates.map(t => `<option value="${t}">${TEMPLATE_LABELS[t] || t.toUpperCase()}</option>`).join("");
+    } catch { selectEl.innerHTML = `<option value="">Could not load templates</option>`; }
   }
-  loadTemplates("/bank-templates", bankTemplateSelect, "Select a bank…");
-  loadTemplates("/ledger-templates", ledgerTemplateSelect, "Select a ledger format…");
+  loadTemplates("/bank-templates", document.getElementById("bank-template-select"), "Select a bank…");
+  loadTemplates("/ledger-templates", document.getElementById("ledger-template-select"), "Select a ledger format…");
 
-  // ---------- formatting helpers ----------
+  // ---------- formatting ----------
 
   const money = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  function fmtAmount(n) {
-    const sign = n < 0 ? "−" : "";
-    return `${sign}₹${money.format(Math.abs(n))}`;
-  }
+  function fmtAmount(n) { return (n < 0 ? "−" : "") + "₹" + money.format(Math.abs(n)); }
 
   const RULE_LABELS = {
     exact_amount_same_date: "Exact · Same Date",
     exact_amount_near_date: "Exact · Near Date",
-    exact_amount_same_date_fuzzy_desc: "Exact · Same Date · Fuzzy Desc",
-    exact_amount_near_date_fuzzy_desc: "Exact · Near Date · Fuzzy Desc",
-    near_amount_matching_description: "Near Amount · Matching Desc",
+    exact_amount_same_date_fuzzy_desc: "Exact · Same Date · Fuzzy",
+    exact_amount_near_date_fuzzy_desc: "Exact · Near Date · Fuzzy",
+    near_amount_matching_description: "Near Amount · Desc",
   };
-
   const ANOMALY_LABELS = {
     duplicate_payment: "Duplicate Payment",
     just_below_approval_threshold: "Threshold Avoidance",
-    round_number_entry: "Round Number Entry",
+    round_number_entry: "Round Number",
     reversed_mirrored_entry: "Reversed Entry",
-    unusual_timing_gap: "Unusual Timing Gap",
+    unusual_timing_gap: "Timing Gap",
   };
-
   const ANOMALY_SEVERITY = {
-    duplicate_payment: "red",
-    just_below_approval_threshold: "red",
-    reversed_mirrored_entry: "red",
-    round_number_entry: "amber",
-    unusual_timing_gap: "amber",
+    duplicate_payment: "red", just_below_approval_threshold: "red",
+    reversed_mirrored_entry: "red", round_number_entry: "amber", unusual_timing_gap: "amber",
   };
 
   function escapeHtml(s) {
-    return String(s ?? "").replace(/[&<>"']/g, (c) => (
-      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-    ));
+    return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
 
   // ---------- source grounding ----------
@@ -909,17 +1141,12 @@
   // row is shown with its neighbours rather than floating alone and unplaceable.
   const BAND_PAD = 0.018;
 
-  // The rendered pages arrive once with the result and are shared by every citation
-  // that points into the same document, rather than being carried per row — the same
-  // page backs many rows, and duplicating it per row would multiply the payload.
-  let RESULTS = {};
-
   // The money column is what a reviewer is being pointed at: it is the figure that
   // put the row in front of them. Falls back to whatever the row does carry.
   function triggeringCell(cells) {
-    const money = cells.filter((c) => ["debit", "credit", "amount"].includes(c.field) && c.value);
+    const money = cells.filter(c => ["debit", "credit", "amount"].includes(c.field) && c.value);
     if (money.length) return money[0];
-    return cells.find((c) => c.field === "reference" && c.value) || null;
+    return cells.find(c => c.field === "reference" && c.value) || null;
   }
 
   function sheetRow(ref) {
@@ -927,15 +1154,15 @@
     if (!cells.length) return "";
     const hit = triggeringCell(cells);
     return `<div class="sheet-wrap"><table class="sheet-row">
-      <thead><tr>${cells.map((c) => `<th>${escapeHtml(c.column)}</th>`).join("")}</tr></thead>
-      <tbody><tr>${cells.map((c) => `<td class="${c === hit ? "cell-hit" : ""}">${escapeHtml(c.value)}</td>`).join("")}</tr></tbody>
+      <thead><tr>${cells.map(c => `<th>${escapeHtml(c.column)}</th>`).join("")}</tr></thead>
+      <tbody><tr>${cells.map(c => `<td class="${c === hit ? "cell-hit" : ""}">${escapeHtml(c.value)}</td>`).join("")}</tr></tbody>
     </table></div>`;
   }
 
   function pageImage(txn) {
     const ref = txn.source_ref;
     if (!ref || !ref.box || !ref.page) return "";
-    const byPage = (RESULTS.page_images || {})[txn.file_name];
+    const byPage = (state.result && state.result.page_images || {})[txn.file_name];
     const url = byPage && byPage[String(ref.page)];
     if (!url) return "";
 
@@ -950,7 +1177,7 @@
     const cells = ref.cell_boxes || {};
     const cell = cells.debit || cells.credit || cells.balance || cells.reference || null;
 
-    const pct = (v) => (v * 100).toFixed(3) + "%";
+    const pct = v => (v * 100).toFixed(3) + "%";
     const hl = (b, cls) => b
       ? `<div class="hl ${cls}" style="left:${pct(b.x0)};top:${pct(b.y0)};width:${pct(b.x1 - b.x0)};height:${pct(b.y1 - b.y0)};"></div>`
       : "";
@@ -976,9 +1203,6 @@
       return `<div class="source-block"><div class="source-head">${label} · ${file}</div>
         <div class="source-missing">No source record for this row.</div></div>`;
     }
-    // A row the model read has no line to point at. Saying so is the honest answer;
-    // inventing a plausible line number would be exactly the unsourced claim this
-    // feature exists to remove.
     // A spreadsheet row reads far better as the row it is than as a run of
     // "column: value" text, so the table replaces the raw line where we have cells.
     const body = (ref.cells && ref.cells.length)
@@ -986,6 +1210,7 @@
       : ref.text
         ? `<pre class="source-text">${escapeHtml(ref.text)}</pre>`
         : `<div class="source-missing">${escapeHtml(ref.label)}</div>`;
+    const rendered = pageImage(txn);
     // Where the two disagree the reviewer must be told which figure the
     // reconciliation used, or the highlighted cell looks like a contradiction.
     const purged = state.documentsPurged
@@ -1001,8 +1226,8 @@
       <div class="source-head">${label} · ${file} · <span class="source-loc">${escapeHtml(ref.label)}</span></div>
       ${body}
       ${corrected}
-      ${pageImage(txn)}
-      ${(ref.kind === "pdf_line" && !pageImage(txn)) ? purged : ""}
+      ${rendered}
+      ${(ref.kind === "pdf_line" && !rendered) ? purged : ""}
     </div>`;
   }
 
@@ -1025,166 +1250,125 @@
     </details>`;
   }
 
-  // ---------- results rendering ----------
+  // ---------- rendering ----------
 
   function renderMatched(pairs) {
-    if (!pairs.length) return `<div class="empty-state">No deterministic matches.</div>`;
-    return pairs.map((pair) => `
+    if (!pairs.length) return `<div class="empty-panel">No deterministic matches.</div>`;
+    return pairs.map(p => `
       <div class="pair-card">
         <div class="pair-row bank">
-          <div>${pair.bank.date}</div>
-          <div><span class="side-tag bank mono">BANK</span>${escapeHtml(pair.bank.description)}</div>
-          <div style="text-align:right; font-weight:600;">${fmtAmount(pair.bank.amount)}</div>
-          <div class="mono" style="font-size:11px; color:var(--text-muted); text-align:right; text-transform:uppercase; letter-spacing:0.03em;">${RULE_LABELS[pair.rule] || pair.rule}</div>
+          <div>${p.bank.date}</div>
+          <div><span class="side-tag bank">BANK</span>${escapeHtml(p.bank.description)}</div>
+          <div style="text-align:right;font-weight:600;">${fmtAmount(p.bank.amount)}</div>
+          <div class="mono" style="font-size:10px;color:var(--text-muted);text-align:right;text-transform:uppercase;">${RULE_LABELS[p.rule] || p.rule}</div>
         </div>
         <div class="pair-row ledger">
-          <div>${pair.ledger.date}</div>
-          <div><span class="side-tag ledger mono">LEDGER</span>${escapeHtml(pair.ledger.description)}</div>
-          <div style="text-align:right; font-weight:600;">${fmtAmount(pair.ledger.amount)}</div>
+          <div>${p.ledger.date}</div>
+          <div><span class="side-tag ledger">LEDGER</span>${escapeHtml(p.ledger.description)}</div>
+          <div style="text-align:right;font-weight:600;">${fmtAmount(p.ledger.amount)}</div>
           <div></div>
         </div>
-        ${pair.issue ? `<div class="reasoning">${escapeHtml(pair.issue)}</div>` : ""}
-        ${pairSource(pair)}
-      </div>
-    `).join("");
+        ${p.issue ? `<div class="reasoning">${escapeHtml(p.issue)}</div>` : ""}
+        ${pairSource(p)}
+      </div>`).join("");
   }
 
-  // The workbook splits review by reason (Review - Amount / Date / Weak Evidence)
-  // because reviewing amount differences is a different job from reviewing timing
-  // differences. The screen mirrors that grouping so the two do not disagree.
   const REVIEW_GROUPS = [
-    { key: "amount", label: "Amounts disagree",
-      hint: "The two sides record different figures — a fee, a rounding, or an error.",
-      test: (p) => p.bank.amount !== p.ledger.amount },
-    { key: "date", label: "Booked on different dates",
-      hint: "Same figure, different day — usually bank clearing lag.",
-      test: (p) => p.bank.date !== p.ledger.date },
-    { key: "weak", label: "Matched on figures alone",
-      hint: "No shared reference or payee ties these together, so two unrelated payments of the same size on the same day would look identical.",
-      test: (p) => p.corroboration === "amount_and_date_only" },
+    { key: "amount", label: "Amounts disagree", hint: "The two sides record different figures — a fee, a rounding, or an error.", test: p => p.bank.amount !== p.ledger.amount },
+    { key: "date",   label: "Booked on different dates", hint: "Same figure, different day — usually bank clearing lag.", test: p => p.bank.date !== p.ledger.date },
+    { key: "weak",   label: "Matched on figures alone", hint: "No shared reference or payee ties these together.", test: p => p.corroboration === "amount_and_date_only" },
   ];
 
-  // A pairing failing on more than one count appears under EVERY reason it fails,
-  // not just a primary one — otherwise someone reviewing all the date differences
-  // would not see it, and would reasonably conclude there were none.
-  function reviewPairs(matched) {
-    return matched.filter((p) => REVIEW_GROUPS.some((g) => g.test(p)));
-  }
-
   function renderReview(matched) {
-    const groups = REVIEW_GROUPS
-      .map((g) => ({ ...g, pairs: matched.filter(g.test) }))
-      .filter((g) => g.pairs.length);
-
-    if (!groups.length) {
-      return `<div class="empty-state">Nothing needs review — every pairing agrees on amount and date, and is backed by a shared reference or payee.</div>`;
-    }
-    return groups.map((g) => `
-      <div style="margin-bottom: 28px;">
-        <div class="unmatched-col-label mono">${g.label} · ${g.pairs.length}</div>
-        <div style="font-size:12px; color:var(--text-muted); margin:-4px 0 10px;">${g.hint}</div>
+    const groups = REVIEW_GROUPS.map(g => ({ ...g, pairs: matched.filter(g.test) })).filter(g => g.pairs.length);
+    if (!groups.length) return `<div class="empty-panel">Nothing needs review — every pairing agrees on amount and date, and is backed by a shared reference or payee.</div>`;
+    return groups.map(g => `
+      <div class="review-group">
+        <div class="review-group-title mono">${g.label} · ${g.pairs.length}</div>
+        <div class="review-group-hint">${g.hint}</div>
         ${renderMatched(g.pairs)}
-      </div>
-    `).join("");
+      </div>`).join("");
   }
 
   function renderAiMatched(pairs) {
-    if (!pairs.length) return `<div class="empty-state">No AI-confirmed matches.</div>`;
-    return pairs.map((pair) => `
+    if (!pairs.length) return `<div class="empty-panel">No AI-confirmed matches.</div>`;
+    return pairs.map(p => `
       <div class="pair-card">
-        <div class="pair-row bank" style="grid-template-columns: 90px 1fr 130px 90px;">
-          <div>${pair.bank.date}</div>
-          <div><span class="side-tag bank mono">BANK</span>${escapeHtml(pair.bank.description)}</div>
-          <div style="text-align:right; font-weight:600;">${fmtAmount(pair.bank.amount)}</div>
-          <div class="mono" style="font-size:12px; text-align:right; color:var(--accent-dark); font-weight:500;">${Math.round(pair.confidence * 100)}% conf.</div>
+        <div class="pair-row bank" style="grid-template-columns:82px 1fr 120px 70px;">
+          <div>${p.bank.date}</div>
+          <div><span class="side-tag bank">BANK</span>${escapeHtml(p.bank.description)}</div>
+          <div style="text-align:right;font-weight:600;">${fmtAmount(p.bank.amount)}</div>
+          <div class="mono" style="font-size:11px;text-align:right;color:var(--accent-dark);font-weight:600;">${Math.round(p.confidence*100)}%</div>
         </div>
-        <div class="pair-row ledger" style="grid-template-columns: 90px 1fr 130px 90px;">
-          <div>${pair.ledger.date}</div>
-          <div><span class="side-tag ledger mono">LEDGER</span>${escapeHtml(pair.ledger.description)}</div>
-          <div style="text-align:right; font-weight:600;">${fmtAmount(pair.ledger.amount)}</div>
+        <div class="pair-row ledger" style="grid-template-columns:82px 1fr 120px 70px;">
+          <div>${p.ledger.date}</div>
+          <div><span class="side-tag ledger">LEDGER</span>${escapeHtml(p.ledger.description)}</div>
+          <div style="text-align:right;font-weight:600;">${fmtAmount(p.ledger.amount)}</div>
           <div></div>
         </div>
-        <div class="reasoning">"${escapeHtml(pair.reasoning)}"</div>
+        <div class="reasoning">"${escapeHtml(p.reasoning)}"</div>
         <details class="source-details">
           <summary>Show source</summary>
-          <div class="source-rule">Rule that fired: <b>AI confirmation</b> · confidence <b>${Math.round(pair.confidence * 100)}%</b></div>
-          ${sourceBlock("BANK", pair.bank)}
-          ${sourceBlock("LEDGER", pair.ledger)}
+          <div class="source-rule">Rule that fired: <b>AI confirmation</b> · confidence <b>${Math.round(p.confidence * 100)}%</b></div>
+          ${sourceBlock("BANK", p.bank)}
+          ${sourceBlock("LEDGER", p.ledger)}
         </details>
-      </div>
-    `).join("");
+      </div>`).join("");
   }
 
   function renderUnmatchedCol(label, txns) {
     const body = txns.length
-      ? txns.map((txn) => `
+      ? txns.map(t => `
           <div class="unmatched-card">
-            <div class="top-row"><span style="color:var(--text-muted);">${txn.date}</span><span style="font-weight:600;">${fmtAmount(txn.amount)}</span></div>
-            <div class="desc">${escapeHtml(txn.description)}</div>
-            <div class="reason">${escapeHtml(txn.reason)}</div>
-            ${txnSource(txn, `Why unmatched: <b>${escapeHtml(txn.reason || "")}</b>`)}
-          </div>
-        `).join("")
-      : `<div class="empty-state">None.</div>`;
+            <div class="top-row"><span style="color:var(--text-muted);">${t.date}</span><span style="font-weight:600;">${fmtAmount(t.amount)}</span></div>
+            <div class="desc">${escapeHtml(t.description)}</div>
+            <div class="reason">${escapeHtml(t.reason)}</div>
+            ${txnSource(t, `Why unmatched: <b>${escapeHtml(t.reason || "")}</b>`)}
+          </div>`).join("")
+      : `<div class="empty-panel">None.</div>`;
     return `<div><div class="unmatched-col-label mono">${label} · ${txns.length}</div>${body}</div>`;
   }
 
-  function renderUnmatched(bankOnly, ledgerOnly) {
-    return `<div class="unmatched-grid">
-      ${renderUnmatchedCol("Bank only", bankOnly)}
-      ${renderUnmatchedCol("Ledger only", ledgerOnly)}
-    </div>`;
-  }
-
   function renderAnomalies(flags) {
-    if (!flags.length) return `<div class="empty-state">No anomalies flagged.</div>`;
-    return flags.map((flag) => {
-      const severity = ANOMALY_SEVERITY[flag.rule] || "amber";
-      const total = flag.transactions.reduce((sum, t) => sum + t.amount, 0);
-      const countSuffix = flag.transactions.length > 1 ? ` × ${flag.transactions.length}` : "";
+    if (!flags.length) return `<div class="empty-panel">No anomalies flagged.</div>`;
+    return flags.map(f => {
+      const sev = ANOMALY_SEVERITY[f.rule] || "amber";
+      const total = f.transactions.reduce((s, t) => s + t.amount, 0);
+      const count = f.transactions.length > 1 ? ` × ${f.transactions.length}` : "";
       return `
-        <div class="anomaly-card severity-${severity}">
+        <div class="anomaly-card severity-${sev}">
           <div class="anomaly-top">
-            <span class="anomaly-rule mono">${ANOMALY_LABELS[flag.rule] || flag.rule}</span>
-            <span class="anomaly-amount">${fmtAmount(total)}${countSuffix}</span>
+            <span class="anomaly-rule">${ANOMALY_LABELS[f.rule] || f.rule}</span>
+            <span class="anomaly-amount">${fmtAmount(total)}${count}</span>
           </div>
-          <div class="anomaly-reason">${escapeHtml(flag.reason)}</div>
+          <div class="anomaly-reason">${escapeHtml(f.reason)}</div>
           <details class="source-details">
-            <summary>Show source${flag.transactions.length > 1 ? ` (${flag.transactions.length} rows)` : ""}</summary>
-            <div class="source-rule">Rule that fired: <b>${escapeHtml(ANOMALY_LABELS[flag.rule] || flag.rule)}</b></div>
-            ${flag.transactions.map((t) => sourceBlock(String(t.source || "").toUpperCase(), t)).join("")}
+            <summary>Show source${f.transactions.length > 1 ? ` (${f.transactions.length} rows)` : ""}</summary>
+            <div class="source-rule">Rule that fired: <b>${escapeHtml(ANOMALY_LABELS[f.rule] || f.rule)}</b></div>
+            ${f.transactions.map(t => sourceBlock(String(t.source || "").toUpperCase(), t)).join("")}
           </details>
-        </div>
-      `;
+        </div>`;
     }).join("");
   }
 
   function renderResults(data) {
     state.result = data;
-    RESULTS = data;
-
-    const names = state.storedFiles
-      ? state.storedFiles
-      : { bank: state.bank && state.bank.name, ledger: state.ledger && state.ledger.name };
-    const client = currentClient();
-    document.getElementById("results-filenames").textContent =
-      `${client ? client.name + " · " : ""}${names.bank || "?"} → ${names.ledger || "?"}`;
 
     document.getElementById("stat-bank-total").textContent = fmtAmount(data.summary.bank_total);
-    document.getElementById("stat-bank-count").textContent = `${data.summary.bank_count} rows`;
+    document.getElementById("stat-bank-count").textContent = data.summary.bank_count + " rows";
     document.getElementById("stat-ledger-total").textContent = fmtAmount(data.summary.ledger_total);
-    document.getElementById("stat-ledger-count").textContent = `${data.summary.ledger_count} rows`;
+    document.getElementById("stat-ledger-count").textContent = data.summary.ledger_count + " rows";
     document.getElementById("stat-difference").textContent = fmtAmount(data.summary.difference);
 
-    const unexplainedEl = document.getElementById("stat-unexplained");
-    const iconEl = document.getElementById("unexplained-icon");
-    const isBalanced = Math.abs(data.summary.unexplained) < 0.005;
-    unexplainedEl.textContent = fmtAmount(data.summary.unexplained);
-    unexplainedEl.style.color = isBalanced ? "#f3faef" : "#ffb4a8";
-    iconEl.querySelectorAll("circle, path").forEach((el) => el.setAttribute("stroke", isBalanced ? "#9ecf81" : "#ff8a75"));
+    const balanced = Math.abs(data.summary.unexplained) < 0.005;
+    const unexpEl = document.getElementById("stat-unexplained");
+    unexpEl.textContent = fmtAmount(data.summary.unexplained);
+    unexpEl.className = "stat-cell-value mono " + (balanced ? "balanced" : "unbalanced");
+    document.getElementById("stats-section").style.display = "block";
 
+    const reviewCount = data.matched.filter(p => REVIEW_GROUPS.some(g => g.test(p))).length;
     document.getElementById("badge-matched").textContent = data.matched.length;
-    document.getElementById("badge-review").textContent = reviewPairs(data.matched).length;
+    document.getElementById("badge-review").textContent = reviewCount;
     document.getElementById("badge-ai").textContent = data.ai_matched.length;
     document.getElementById("badge-unmatched").textContent = data.unmatched_bank.length + data.unmatched_ledger.length;
     document.getElementById("badge-anomalies").textContent = data.anomalies.length;
@@ -1192,266 +1376,305 @@
     document.getElementById("panel-matched").innerHTML = renderMatched(data.matched);
     document.getElementById("panel-review").innerHTML = renderReview(data.matched);
     document.getElementById("panel-ai").innerHTML = renderAiMatched(data.ai_matched);
-    document.getElementById("panel-unmatched").innerHTML = renderUnmatched(data.unmatched_bank, data.unmatched_ledger);
+    document.getElementById("panel-unmatched").innerHTML = `<div class="unmatched-grid">${renderUnmatchedCol("Bank only", data.unmatched_bank)}${renderUnmatchedCol("Ledger only", data.unmatched_ledger)}</div>`;
     document.getElementById("panel-anomalies").innerHTML = renderAnomalies(data.anomalies);
 
-    document.getElementById("upload-view").style.display = "none";
-    document.getElementById("results-view").style.display = "block";
+    document.getElementById("empty-state").style.display = "none";
+    document.getElementById("results-panel").classList.add("active");
+
+    // Switch to anomalies tab if any flagged, otherwise matched.
+    const firstTab = data.anomalies.length ? "anomalies" : "matched";
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === firstTab));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + firstTab));
   }
 
-  // ---------- clients and history ----------
+  // ---------- tabs ----------
 
-  const CLIENT_KEY = "reconciliation.clientId";
-  let CLIENTS = [];
-
-  function fmtWhen(iso) {
-    const d = new Date(iso);
-    if (isNaN(d)) return iso;
-    const today = new Date();
-    const sameDay = d.toDateString() === today.toDateString();
-    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    return sameDay ? `Today ${time}` : d.toLocaleDateString([], { day: "numeric", month: "short" }) + ` ${time}`;
-  }
-
-  function currentClient() {
-    return CLIENTS.find((c) => c.id === state.clientId) || null;
-  }
-
-  async function loadClients() {
-    try {
-      CLIENTS = (await (await fetch("/clients")).json()).clients;
-    } catch { CLIENTS = []; }
-
-    // Fall back to the most recently active client rather than none: landing with
-    // nothing selected makes the first reconciliation of a session unsaveable by
-    // default, which is the case a history feature exists to prevent.
-    if (!CLIENTS.some((c) => c.id === state.clientId)) {
-      state.clientId = CLIENTS.length ? CLIENTS[0].id : null;
-    }
-    if (state.clientId) localStorage.setItem(CLIENT_KEY, state.clientId);
-
-    document.getElementById("client-list").innerHTML = CLIENTS.length
-      ? CLIENTS.map((c) => `
-          <li><button class="client-row ${c.id === state.clientId ? "active" : ""}" data-client="${c.id}">
-            ${escapeHtml(c.name)}<span class="count">${c.run_count || 0}</span>
-          </button></li>`).join("")
-      : `<div class="sb-empty">No clients yet. Add one with + to start filing reconciliations against it.</div>`;
-
-    document.querySelectorAll("[data-client]").forEach((el) =>
-      el.addEventListener("click", () => selectClient(el.dataset.client)));
-
-    const client = currentClient();
-    document.getElementById("sb-context").textContent = client ? client.name : "No client selected";
-    document.getElementById("client-thresholds").disabled = !client;
-    document.getElementById("client-export").disabled = !client;
-    document.getElementById("threshold-panel").style.display = "none";
-    await loadRuns();
-  }
-
-  async function selectClient(id) {
-    state.clientId = id;
-    localStorage.setItem(CLIENT_KEY, id);
-    await loadClients();
-  }
-
-  async function loadRuns() {
-    const list = document.getElementById("run-list");
-    if (!state.clientId) {
-      list.innerHTML = `<div class="sb-empty">Select a client to see their past reconciliations.</div>`;
-      return;
-    }
-    let runs = [];
-    try {
-      runs = (await (await fetch(`/clients/${state.clientId}/runs`)).json()).runs;
-    } catch { runs = []; }
-
-    list.innerHTML = runs.length
-      ? runs.map((r) => {
-          const s = r.summary || {};
-          // UNEXPLAINED is the balancing proof; anything but zero means a row was
-          // mismatched, double-counted or dropped, and it belongs on the card rather
-          // than three clicks in.
-          const bad = s.unexplained !== 0 && s.unexplained !== null && s.unexplained !== undefined;
-          const open = (s.unmatched_bank || 0) + (s.unmatched_ledger || 0);
-          return `<li><button class="run-row ${r.id === state.runId ? "active" : ""}" data-run="${r.id}">
-            <div class="when">${fmtWhen(r.created_at)}</div>
-            <div class="stat">${s.matched || 0} matched · ${open} open${s.anomalies ? ` · ${s.anomalies} flagged` : ""}${bad ? ` · <span class="flag">unexplained</span>` : ""}</div>
-          </button></li>`;
-        }).join("")
-      : `<div class="sb-empty">Nothing run for this client yet.</div>`;
-
-    document.querySelectorAll("[data-run]").forEach((el) =>
-      el.addEventListener("click", () => openRun(el.dataset.run)));
-  }
-
-  async function openRun(runId) {
-    setStatus("", "");
-    try {
-      const response = await fetch(`/runs/${runId}`);
-      if (!response.ok) throw new Error("Could not open that run.");
-      const stored = await response.json();
-      state.runId = runId;
-      // A stored run has no File objects behind it, so the header reads its filenames
-      // from the record rather than from whatever is sitting in the upload boxes.
-      state.storedFiles = { bank: stored.bank_file_name, ledger: stored.ledger_file_name };
-      state.documentsPurged = stored.documents_available === false;
-      renderResults(stored.result);
-      await loadRuns();
-    } catch (err) {
-      setStatus("error", err.message || "Could not open that run.");
-    }
-  }
-
-  document.getElementById("add-client").addEventListener("click", async () => {
-    const name = prompt("Client name");
-    if (!name || !name.trim()) return;
-    const body = new FormData();
-    body.append("name", name.trim());
-    const response = await fetch("/clients", { method: "POST", body });
-    if (response.status === 409) {
-      setStatus("error", `A client named "${name.trim()}" already exists.`);
-      return;
-    }
-    if (!response.ok) { setStatus("error", "Could not add that client."); return; }
-    const created = await response.json();
-    await selectClient(created.id);
-  });
-
-  // Stage 3's thresholds belong to the engagement, not the run: an approval limit is
-  // a property of the business. Editing the raw config is deliberate — it is the same
-  // shape the API takes, so what is on screen is exactly what will be applied.
-  const thresholdPanel = document.getElementById("threshold-panel");
-
-  document.getElementById("client-thresholds").addEventListener("click", async () => {
-    if (!state.clientId) return;
-    if (thresholdPanel.style.display === "block") { thresholdPanel.style.display = "none"; return; }
-    try {
-      const data = await (await fetch(`/clients/${state.clientId}/anomaly-config`)).json();
-      document.getElementById("threshold-json").value = JSON.stringify(data.config, null, 2);
-      document.getElementById("threshold-state").textContent = data.is_default
-        ? "Using the defaults. Saving stores these against this client, and every run for them uses them."
-        : "This client has its own thresholds.";
-      thresholdPanel.style.display = "block";
-      thresholdPanel.open = true;
-    } catch { setStatus("error", "Could not load this client's thresholds."); }
-  });
-
-  document.getElementById("threshold-save").addEventListener("click", async () => {
-    let parsed;
-    try {
-      parsed = JSON.parse(document.getElementById("threshold-json").value);
-    } catch {
-      setStatus("error", "That is not valid JSON, so nothing was saved.");
-      return;
-    }
-    const body = new FormData();
-    body.append("config", JSON.stringify(parsed));
-    const response = await fetch(`/clients/${state.clientId}/anomaly-config`, { method: "PUT", body });
-    if (!response.ok) {
-      let message = "Could not save those thresholds.";
-      try { const d = await response.json(); if (d.detail) message = d.detail; } catch (_) {}
-      setStatus("error", message);
-      return;
-    }
-    document.getElementById("threshold-state").textContent = "Saved. Every run for this client uses these.";
-    setStatus("", "");
-  });
-
-  document.getElementById("threshold-reset").addEventListener("click", async () => {
-    await fetch(`/clients/${state.clientId}/anomaly-config`, { method: "PUT", body: new FormData() });
-    const data = await (await fetch(`/clients/${state.clientId}/anomaly-config`)).json();
-    document.getElementById("threshold-json").value = JSON.stringify(data.config, null, 2);
-    document.getElementById("threshold-state").textContent = "Back to the defaults.";
-  });
-
-  // The database is otherwise the only copy of an engagement's history.
-  document.getElementById("client-export").addEventListener("click", () => {
-    if (state.clientId) window.location = `/clients/${state.clientId}/export`;
-  });
-
-  document.getElementById("sb-new-run").addEventListener("click", () => {
-    state.runId = null;
-    state.storedFiles = null;
-    document.getElementById("results-view").style.display = "none";
-    document.getElementById("upload-view").style.display = "flex";
-    loadRuns();
-  });
-
-  state.clientId = localStorage.getItem(CLIENT_KEY);
-  loadClients();
-
-  document.querySelectorAll(".tab-btn").forEach((btn) => {
+  document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
       btn.classList.add("active");
       document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
     });
   });
 
+  // ---------- download ----------
+
   document.getElementById("download-xlsx").addEventListener("click", () => {
     if (!state.result) return;
-    if (!state.result.report_base64 && state.runId) {
-      window.location = `/runs/${state.runId}/report.xlsx`;
-      return;
-    }
     const bytes = atob(state.result.report_base64);
-    const buffer = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
-    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "reconciliation_report.xlsx";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    const buf = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+    const a = Object.assign(document.createElement("a"), {
+      href: URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })),
+      download: "reconciliation_report.xlsx"
+    });
+    document.body.appendChild(a); a.click(); a.remove();
   });
 
-  document.getElementById("new-reconciliation").addEventListener("click", () => {
-    document.getElementById("results-view").style.display = "none";
-    document.getElementById("upload-view").style.display = "flex";
-  });
+  // ---------- run ----------
 
-  reconcileBtn.addEventListener("click", async () => {
+  document.getElementById("reconcile").addEventListener("click", async () => {
     const formData = new FormData();
     formData.append("bank_file", state.bank);
     formData.append("ledger_file", state.ledger);
     if (state.bankTemplate) formData.append("bank_pdf_template", state.bankTemplate);
     if (state.ledgerTemplate) formData.append("ledger_pdf_template", state.ledgerTemplate);
-    // Filed against the selected client so it joins their history. Without one the
-    // reconciliation still runs and is shown; it simply is not kept.
     if (state.clientId) formData.append("client_id", state.clientId);
 
-    reconcileBtn.disabled = true;
-    setStatus("loading", "Reconciling — this can take a minute…");
+    document.getElementById("reconcile").disabled = true;
+    setRunStatus("", "Running — this may take a minute…");
+    startProgress();
 
     try {
-      const response = await fetch("/reconcile/preview", { method: "POST", body: formData });
-      if (!response.ok) {
-        let message = `Request failed (${response.status})`;
-        try {
-          const data = await response.json();
-          if (data.detail) message = data.detail;
-        } catch (_) {}
-        throw new Error(message);
+      const res = await fetch("/reconcile/preview", { method: "POST", body: formData });
+      if (!res.ok) {
+        let msg = `Request failed (${res.status})`;
+        try { const d = await res.json(); if (d.detail) msg = d.detail; } catch {}
+        throw new Error(msg);
       }
-      const data = await response.json();
-      setStatus("");
-      state.runId = data.saved_run ? data.saved_run.id : null;
-      state.storedFiles = null;
+      const data = await res.json();
+      finishProgress(true);
+      state.viewingRunId = null;
+      state.documentsPurged = false;
+      document.getElementById("history-banner").style.display = "none";
       renderResults(data);
-      // The new run should appear in the sidebar immediately, and the client's run
-      // count with it.
-      if (data.saved_run) loadClients();
-      else if (state.clientId) setStatus("error", "Reconciled, but this run could not be saved to the client's history.");
+      if (state.clientId) {
+        if (data.saved_run) {
+          setRunStatus("", "Saved to history.");
+          await loadClients();
+        } else {
+          setRunStatus("error", "Reconciled, but this run could not be saved to the client's history.");
+        }
+      } else {
+        setRunStatus("", "");
+      }
     } catch (err) {
-      setStatus("error", err.message);
+      finishProgress(false);
+      setRunStatus("error", err.message);
     } finally {
       updateReconcileEnabled();
     }
   });
+
+  // ---------- clients and history ----------
+
+  function initials(name) {
+    return name.trim().split(/\s+/).slice(0, 2).map(w => w[0].toUpperCase()).join("");
+  }
+
+  function renderClientList() {
+    const list = document.getElementById("client-list");
+    if (!state.clients.length) {
+      list.innerHTML = `<div class="rail-empty">No clients yet. Add one to start filing reconciliations against it.</div>`;
+      return;
+    }
+    list.innerHTML = state.clients.map(c => `
+      <div class="client-row ${c.id === state.clientId ? "active" : ""}" data-client-id="${c.id}">
+        <div class="client-row-avatar">${escapeHtml(initials(c.name))}</div>
+        <div class="client-row-body">
+          <div class="client-row-name">${escapeHtml(c.name)}</div>
+          <div class="client-row-meta">${c.run_count} run${c.run_count === 1 ? "" : "s"}</div>
+        </div>
+        <button class="client-row-delete" data-delete-client="${c.id}" title="Delete client">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h10l1-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>`).join("");
+
+    list.querySelectorAll("[data-client-id]").forEach(el => el.addEventListener("click", (e) => {
+      if (e.target.closest("[data-delete-client]")) return;
+      selectClient(el.dataset.clientId);
+    }));
+    list.querySelectorAll("[data-delete-client]").forEach(el => el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteClient(el.dataset.deleteClient);
+    }));
+  }
+
+  async function loadClients() {
+    try {
+      state.clients = (await (await fetch("/clients")).json()).clients;
+    } catch { state.clients = []; }
+
+    if (!state.clients.some(c => c.id === state.clientId)) state.clientId = null;
+    renderClientList();
+    await loadHistory();
+  }
+
+  async function selectClient(id) {
+    state.clientId = id;
+    state.viewingRunId = null;
+    document.getElementById("history-banner").style.display = "none";
+    if (id) localStorage.setItem(CLIENT_KEY, id); else localStorage.removeItem(CLIENT_KEY);
+    renderClientList();
+    await loadHistory();
+  }
+
+  async function addClient(name) {
+    const errorEl = document.getElementById("new-client-error");
+    errorEl.textContent = "";
+    const body = new FormData();
+    body.append("name", name);
+    const res = await fetch("/clients", { method: "POST", body });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      errorEl.textContent = d.detail || "Could not add that client.";
+      return false;
+    }
+    const created = await res.json();
+    await loadClients();
+    await selectClient(created.id);
+    return true;
+  }
+
+  async function deleteClient(id) {
+    const c = state.clients.find(c => c.id === id);
+    if (!confirm(`Delete ${c ? c.name : "this client"} and everything in their history? This cannot be undone.`)) return;
+    await fetch(`/clients/${id}`, { method: "DELETE" });
+    if (state.clientId === id) {
+      state.clientId = null;
+      localStorage.removeItem(CLIENT_KEY);
+    }
+    await loadClients();
+  }
+
+  function renderHistoryList() {
+    const list = document.getElementById("history-list");
+    const nameEl = document.getElementById("history-client-name");
+    const client = state.clients.find(c => c.id === state.clientId);
+    nameEl.textContent = client ? client.name : "";
+
+    if (!state.clientId) {
+      list.innerHTML = `<div class="rail-empty">Select a client to see their past reconciliations.</div>`;
+      return;
+    }
+    if (!state.historyRuns.length) {
+      list.innerHTML = `<div class="rail-empty">Nothing filed for this client yet. Run a reconciliation to add one.</div>`;
+      return;
+    }
+    list.innerHTML = state.historyRuns.map(r => {
+      const s = r.summary;
+      const when = new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      return `
+      <div class="history-row ${r.id === state.viewingRunId ? "active" : ""}" data-run-id="${r.id}">
+        <div class="history-row-date">${when}</div>
+        <div class="history-row-files">${escapeHtml(r.bank_file_name)} → ${escapeHtml(r.ledger_file_name)}</div>
+        <div class="history-row-badges">
+          <span class="hr-badge">${s.matched} matched</span>
+          ${s.anomalies ? `<span class="hr-badge flag">${s.anomalies} flagged</span>` : ""}
+          ${Math.abs(s.unexplained || 0) >= 0.005 ? `<span class="hr-badge flag">unexplained</span>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+
+    list.querySelectorAll("[data-run-id]").forEach(el => el.addEventListener("click", () => openRun(el.dataset.runId)));
+  }
+
+  async function loadHistory() {
+    if (!state.clientId) { state.historyRuns = []; renderHistoryList(); return; }
+    try {
+      state.historyRuns = (await (await fetch(`/clients/${state.clientId}/runs`)).json()).runs;
+    } catch { state.historyRuns = []; }
+    renderHistoryList();
+  }
+
+  async function openRun(runId) {
+    try {
+      const res = await fetch(`/runs/${runId}`);
+      if (!res.ok) throw new Error();
+      const stored = await res.json();
+      state.viewingRunId = runId;
+      state.documentsPurged = stored.documents_available === false;
+      renderResults(stored.result);
+      const when = new Date(stored.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      document.getElementById("history-banner-text").textContent = `Viewing saved reconciliation from ${when}`;
+      document.getElementById("history-banner").style.display = "flex";
+      renderHistoryList();
+    } catch {
+      setRunStatus("error", "Could not open that saved run.");
+    }
+  }
+
+  document.getElementById("history-banner-delete").addEventListener("click", async () => {
+    if (!state.viewingRunId) return;
+    if (!confirm("Delete this saved reconciliation? This cannot be undone.")) return;
+    await fetch(`/runs/${state.viewingRunId}`, { method: "DELETE" });
+    state.viewingRunId = null;
+    document.getElementById("history-banner").style.display = "none";
+    document.getElementById("results-panel").classList.remove("active");
+    document.getElementById("empty-state").style.display = "flex";
+    await loadHistory();
+  });
+
+  const newClientBtn = document.getElementById("new-client-btn");
+  const newClientForm = document.getElementById("new-client-form");
+  const newClientInput = document.getElementById("new-client-name");
+
+  newClientBtn.addEventListener("click", () => {
+    newClientForm.hidden = false;
+    newClientBtn.hidden = true;
+    newClientInput.value = "";
+    document.getElementById("new-client-error").textContent = "";
+    newClientInput.focus();
+  });
+  document.getElementById("new-client-cancel").addEventListener("click", () => {
+    newClientForm.hidden = true;
+    newClientBtn.hidden = false;
+  });
+  async function submitNewClient() {
+    const name = newClientInput.value.trim();
+    if (!name) { document.getElementById("new-client-error").textContent = "A client needs a name."; return; }
+    if (await addClient(name)) {
+      newClientForm.hidden = true;
+      newClientBtn.hidden = false;
+    }
+  }
+  document.getElementById("new-client-save").addEventListener("click", submitNewClient);
+  newClientInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitNewClient();
+    if (e.key === "Escape") document.getElementById("new-client-cancel").click();
+  });
+
+  state.clientId = localStorage.getItem(CLIENT_KEY);
+  loadClients();
+
+  // ---------- model startup overlay ----------
+
+  (function pollModelReadiness() {
+    const overlay = document.getElementById("model-loading");
+    const bar = document.getElementById("ml-bar");
+    const status = document.getElementById("ml-status");
+    if (!overlay) return;
+
+    let elapsed = 0;
+    const intervalMs = 1000;
+    const giveUpMs = 180000;
+    const messages = ["Initialising…", "Loading chat model…", "Loading embedding model…", "Almost ready…"];
+
+    async function check() {
+      const msgIdx = Math.min(Math.floor(elapsed / 15000), messages.length - 1);
+      status.textContent = messages[msgIdx];
+      bar.style.width = Math.min(90, (elapsed / giveUpMs) * 100 * 4) + "%";
+
+      try {
+        const res = await fetch("/ready");
+        if (res.ok && (await res.json()).ready) {
+          bar.style.width = "100%";
+          status.textContent = "Ready.";
+          setTimeout(() => { overlay.hidden = true; }, 400);
+          return;
+        }
+      } catch {}
+
+      elapsed += intervalMs;
+      if (elapsed >= giveUpMs) { overlay.hidden = true; return; }
+      setTimeout(check, intervalMs);
+    }
+
+    overlay.hidden = false;
+    check();
+  })();
 </script>
 </body>
 </html>

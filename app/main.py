@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import io
 import logging
-import os
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -20,9 +19,14 @@ from pydantic import ValidationError
 # server. The default local setup needs no keys at all.
 load_dotenv()
 
+import os
+
+import httpx
+
 from app.ai_matching.confirmer import LocalMatchConfirmer, MatchConfirmer
 from app.ai_matching.embeddings import EmbeddingClient, LocalEmbeddingClient
 from app.ai_matching.matcher import match_with_ai
+from app.local_llm import DEFAULT_EMBEDDING_SERVER_URL, DEFAULT_SERVER_URL
 from app.ai_matching.models import AIMatchResult
 from app.anomaly.config import AnomalyConfig
 from app.anomaly.detector import detect_anomalies
@@ -148,6 +152,31 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def _server_healthy(url: str) -> bool:
+    try:
+        return httpx.get(f"{url.rstrip('/')}/health", timeout=2.0).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+@app.get("/ready")
+def ready() -> dict:
+    """Report whether both local model servers are up.
+
+    The desktop app opens its window immediately, before the ~2.5GB of weights have
+    finished loading; the UI polls this to know when to swap its loading overlay for
+    the upload form. Checks the llama.cpp servers directly (no coupling to the
+    desktop launcher) so it's also meaningful under a plain `uvicorn` run. If the
+    servers never come up the pipeline still runs Stage 1 deterministically, so this
+    is advisory, not a gate.
+    """
+    chat = _server_healthy(os.environ.get("LLAMA_SERVER_URL", DEFAULT_SERVER_URL))
+    embeddings = _server_healthy(
+        os.environ.get("LLAMA_EMBEDDING_SERVER_URL", DEFAULT_EMBEDDING_SERVER_URL)
+    )
+    return {"ready": chat and embeddings, "chat": chat, "embeddings": embeddings}
+
+
 @app.get("/bank-templates")
 def bank_templates() -> dict:
     return {"templates": list(_BANK_TEMPLATES)}
@@ -173,8 +202,8 @@ def anomaly_config_defaults() -> AnomalyConfig:
 #
 # A CA carries many clients at once and comes back to an engagement weeks later, so a
 # reconciliation is worth little as a one-shot view that vanishes on refresh. Runs are
-# filed against a client and kept, with the documents they were produced from, so the
-# same click-through to the source works on a run from three months ago.
+# filed against a client and kept, so the same click-through to a past result works
+# on a run from three months ago.
 
 
 @app.get("/clients")
@@ -284,9 +313,9 @@ def purge_documents(older_than_days: int = Form(...)) -> dict:
     """Drop stored source files older than a window, keeping the reconciliations.
 
     Documents are almost all of the stored bytes. Dropping them frees that while
-    leaving each run's figures and its file/page/line citations intact — a purged run
-    loses its highlighted page image, not its audit trail. Deleting whole runs is a
-    different decision, and is `DELETE /runs/{id}`.
+    leaving each run's figures intact — a purged run loses its stored source files,
+    not its result. Deleting whole runs is a different decision, and is
+    `DELETE /runs/{id}`.
     """
     try:
         return store.purge_documents(older_than_days)
@@ -395,9 +424,6 @@ def _resolve_anomaly_config(raw: str | None, client_id: str | None) -> AnomalyCo
 def _parse_anomaly_config(raw: str | None) -> AnomalyConfig:
     """Build the Stage 3 config from a JSON form field, falling back to defaults.
 
-    Thresholds are per-engagement, not fixed policy — a client whose approval limit
-    is 25,00,000 gets nothing useful from flags calibrated to 50,000, and one whose
-    every payment is a round number needs the round-number rule tuned or silent.
     Sent as one JSON field rather than a form field per threshold so the config can
     gain settings without the API changing shape, and so pydantic does the
     validating.
@@ -422,40 +448,8 @@ _TEMPLATE_REGISTRIES: dict[Literal["bank", "ledger"], dict[str, BankPDFTemplate]
 }
 
 
-# An upload is held in memory whole — extraction needs random access to the file,
-# and both sides are kept at once so the identical-upload check can compare them. A
-# cap keeps a mis-drop (a video, a disk image, a 2 GB export) from taking the box
-# down with it instead of returning an error. Generous by design: statements and
-# ledger exports are well under a megabyte, so anything near this is already a
-# mistake. Override with MAX_UPLOAD_MB for an unusually large multi-year export.
-MAX_UPLOAD_BYTES = int(float(os.getenv("MAX_UPLOAD_MB", "25")) * 1024 * 1024)
-
-_UPLOAD_CHUNK_BYTES = 1024 * 1024
-
-
 async def _read_upload(file: UploadFile) -> bytes:
-    """Read an upload into memory, refusing anything over MAX_UPLOAD_BYTES.
-
-    Read in chunks and checked as it goes, so an oversized file is rejected partway
-    rather than after it has already been buffered — checking `file.size` or the
-    Content-Length header instead would mean trusting the client about the very
-    thing being limited.
-    """
-    chunks: list[bytes] = []
-    total = 0
-    while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
-        total += len(chunk)
-        if total > MAX_UPLOAD_BYTES:
-            raise HTTPException(
-                413,
-                f"{file.filename or 'The upload'} is larger than the "
-                # :g so a fractional override reads as "0.5 MB", not "0 MB".
-                f"{MAX_UPLOAD_BYTES / (1024 * 1024):g} MB limit. Bank statements and "
-                "ledger exports are far smaller than this, so check that the right "
-                "file was selected; raise MAX_UPLOAD_MB if it genuinely is this big.",
-            )
-        chunks.append(chunk)
-    return b"".join(chunks)
+    return await file.read()
 
 
 def _reject_identical_uploads(bank_bytes: bytes, ledger_bytes: bytes) -> None:
@@ -484,32 +478,25 @@ async def _parse_upload(
     pdf_template: str | None,
     vision_extractor: VisionExtractor,
     contents: bytes | None = None,
-    debit_is_inflow: bool = False,
 ) -> list[Transaction]:
     suffix = Path(file.filename or "").suffix.lower()
     if contents is None:
-        contents = await _read_upload(file)
+        contents = await file.read()
     registry = _TEMPLATE_REGISTRIES[source]
 
-    with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
-        tmp.write(contents)
-        tmp.flush()
-        tmp_path = Path(tmp.name)
+    # Write to a temp file the parsers can open by path. The handle is closed before
+    # parsing because Windows forbids a second open on a still-open NamedTemporaryFile
+    # (pandas/pypdf would hit PermissionError), so we manage deletion ourselves.
+    fd, tmp_name = tempfile.mkstemp(suffix=suffix)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as tmp:
+            tmp.write(contents)
 
         if suffix == ".csv":
-            return parse_csv(
-                tmp_path,
-                source=source,
-                file_name=file.filename,
-                debit_is_inflow=debit_is_inflow,
-            )
+            return parse_csv(tmp_path, source=source, file_name=file.filename)
         if suffix in (".xlsx", ".xls"):
-            return parse_excel(
-                tmp_path,
-                source=source,
-                file_name=file.filename,
-                debit_is_inflow=debit_is_inflow,
-            )
+            return parse_excel(tmp_path, source=source, file_name=file.filename)
         if suffix == ".pdf":
             if pdf_template is None or pdf_template not in registry:
                 raise HTTPException(
@@ -525,7 +512,9 @@ async def _parse_upload(
                 file_name=file.filename,
             )
 
-    raise HTTPException(400, f"Unsupported file type: {suffix!r}")
+        raise HTTPException(400, f"Unsupported file type: {suffix!r}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 @app.post("/ingest", response_model=list[Transaction])
@@ -535,113 +524,9 @@ async def ingest(
     template: str | None = Form(default=None),
     vision_extractor: VisionExtractor = Depends(get_vision_extractor),
 ) -> list[Transaction]:
-    # A named ledger template sets the Debit/Credit convention for the tabular
-    # formats too, not only for PDFs. There is no bank side here to detect against,
-    # so on this route an unnamed spreadsheet ledger keeps the default reading —
-    # /reconcile is where detection happens.
-    ledger_template = _LEDGER_TEMPLATES.get(template or "") if source == "ledger" else None
     return await _parse_upload(
-        file,
-        source=source,
-        pdf_template=template,
-        vision_extractor=vision_extractor,
-        debit_is_inflow=bool(ledger_template and ledger_template.debit_is_inflow),
+        file, source=source, pdf_template=template, vision_extractor=vision_extractor
     )
-
-
-# Formats read into a DataFrame rather than through a PDF template. Their
-# Debit/Credit convention is just as ambiguous as a PDF's, so they get the same
-# detection — the hazard belongs to double-entry bookkeeping, not to the file format.
-_TABULAR_SUFFIXES = (".csv", ".xlsx", ".xls")
-
-
-async def _parse_ledger(
-    ledger_file: UploadFile,
-    *,
-    bank_txns: list[Transaction],
-    ledger_template: str | None,
-    vision_extractor: VisionExtractor,
-    contents: bytes,
-) -> list[Transaction]:
-    """Parse the ledger under the Debit/Credit convention that actually reconciles.
-
-    Whether a ledger's Debit means money in depends on which account the ledger
-    covers, and the file rarely says. Reading it backwards inverts every amount
-    without failing loudly. Unless the caller names a convention, both readings are
-    produced and `choose_ledger_convention` keeps whichever corroborates more
-    matches against the bank.
-
-    This used to run for PDFs only, so a CSV or Excel ledger was always read as
-    "Credit means money in" — correct for a party ledger, backwards for the client's
-    own Bank A/c ledger, which is the usual counterpart to a bank statement. That
-    silently inverted every amount in the file, and a named ledger template was
-    ignored outright on those formats.
-    """
-    suffix = Path(ledger_file.filename or "").suffix.lower()
-
-    async def parse_as(name: str | None) -> list[Transaction]:
-        template = _LEDGER_TEMPLATES.get(name or "")
-        return await _parse_upload(
-            ledger_file,
-            source="ledger",
-            pdf_template=name,
-            vision_extractor=vision_extractor,
-            contents=contents,
-            # Only consulted for the tabular formats; a PDF carries the convention
-            # in the template itself.
-            debit_is_inflow=template.debit_is_inflow if template else False,
-        )
-
-    detectable = suffix == ".pdf" or suffix in _TABULAR_SUFFIXES
-    if ledger_template not in (None, AUTO_LEDGER_TEMPLATE) or not detectable:
-        return await parse_as(ledger_template)
-
-    # Parse under every convention and keep whichever reconciles. Cheap: extraction
-    # is deterministic and runs off the already-read bytes, so this costs a second
-    # table parse, not a second model call.
-    candidates = {name: await parse_as(name) for name in _LEDGER_TEMPLATES}
-
-    # Where every reading produces the same amounts there is nothing to choose, and
-    # saying so beats reporting a tie as an ambiguous call — `choose_ledger_convention`
-    # would warn about a coin toss on something that cannot go either way.
-    #
-    # Two different things cause it, and a diagnostic that names the wrong one sends
-    # whoever is debugging an inverted report looking in the wrong place:
-    #   - the file has one signed Amount column, so there is no convention in it;
-    #   - the file does split Debit/Credit, but its rows print a running balance and
-    #     the balance audit rewrote the amounts from the movement, which is
-    #     sign-convention agnostic and so erases the difference between the readings.
-    readings = list(candidates.values())
-    if all(
-        [t.amount for t in reading] == [t.amount for t in readings[0]]
-        for reading in readings
-    ):
-        # Counted across every reading, not just the one returned. The reading that
-        # got the columns right needs no corrections; it is the INVERTED reading the
-        # audit rewrites, and that is precisely what erases the difference between
-        # them. Looking only at the winner would report "no Debit/Credit split" about
-        # a file that plainly has one.
-        repaired = {
-            name: sum(1 for t in reading if t.printed_amount is not None)
-            for name, reading in candidates.items()
-        }
-        if any(repaired.values()):
-            logger.info(
-                "Ledger Debit/Credit convention cannot change the result: reading it "
-                "as %s needs no correction, while %s is corrected on %s row(s) by the "
-                "running-balance audit, which is sign-convention agnostic — so both "
-                "readings arrive at the same amounts",
-                ", ".join(n for n, c in repaired.items() if not c) or "neither",
-                ", ".join(n for n, c in repaired.items() if c),
-                ", ".join(str(c) for c in repaired.values() if c),
-            )
-        else:
-            logger.info(
-                "Ledger has no Debit/Credit split to interpret — amounts are unambiguous"
-            )
-        return readings[0]
-
-    return choose_ledger_convention(bank_txns, candidates).transactions
 
 
 async def _run_reconciliation(
@@ -673,13 +558,30 @@ async def _run_reconciliation(
         contents=bank_bytes,
     )
 
-    ledger_txns = await _parse_ledger(
-        ledger_file,
-        bank_txns=bank_txns,
-        ledger_template=ledger_pdf_template,
-        vision_extractor=vision_extractor,
-        contents=ledger_bytes,
-    )
+    if ledger_pdf_template in (None, AUTO_LEDGER_TEMPLATE) and Path(
+        ledger_file.filename or ""
+    ).suffix.lower() == ".pdf":
+        # Parse the ledger under every convention and keep whichever reconciles.
+        # Cheap: extraction is deterministic and runs off the already-read bytes, so
+        # this costs a second table parse, not a second model call.
+        candidates = {}
+        for name in _LEDGER_TEMPLATES:
+            candidates[name] = await _parse_upload(
+                ledger_file,
+                source="ledger",
+                pdf_template=name,
+                vision_extractor=vision_extractor,
+                contents=ledger_bytes,
+            )
+        ledger_txns = choose_ledger_convention(bank_txns, candidates).transactions
+    else:
+        ledger_txns = await _parse_upload(
+            ledger_file,
+            source="ledger",
+            pdf_template=ledger_pdf_template,
+            vision_extractor=vision_extractor,
+            contents=ledger_bytes,
+        )
 
     _log_ingestion(bank_txns, ledger_txns)
 
@@ -714,11 +616,8 @@ async def reconcile(
     """Run the pipeline and return the audit-ready report as a downloadable .xlsx.
 
     `client_id` is read for that client's anomaly thresholds only — this route does
-    not file the run, because filing stores the dashboard payload and this route never
-    builds one. Use `/reconcile/preview` to add a run to a client's history. The
-    thresholds are honoured here regardless: a client whose approval limit is not the
-    default getting default flags, silently, from one route and not the other is
-    exactly the kind of quiet wrong answer this engine exists to avoid.
+    not file the run, because filing stores the dashboard payload and this route
+    never builds one. Use `/reconcile/preview` to add a run to a client's history.
     """
     _, _, _, report_bytes, _ = await _run_reconciliation(
         bank_file=bank_file,
@@ -774,6 +673,9 @@ async def reconcile_preview(
     """Run the pipeline once and return it as JSON for the in-browser results
     dashboard, with the .xlsx workbook embedded as base64 so a subsequent download
     doesn't have to run the pipeline (and any live model calls) a second time.
+
+    `client_id`, when given, both applies that client's anomaly thresholds and files
+    the result under their history so it can be reopened later.
     """
     match_result, ai_result, anomaly_result, report_bytes, uploads = await _run_reconciliation(
         bank_file=bank_file,
@@ -847,14 +749,14 @@ async def reconcile_preview(
             }
             for flag in anomaly_result.flags
         ],
-        # Tier 3 of source grounding: the cited pages themselves, so a reviewer can
-        # be shown the row highlighted on the document rather than told where it is.
-        # Keyed by file name, then page number.
         "report_base64": base64.b64encode(report_bytes).decode("ascii"),
     }
 
-    # Rendered from the same helper the history route uses, so a run reopened from
-    # storage is built the same way as the one just produced.
+    # Tier 3 of source grounding: the cited pages themselves, so a reviewer can be
+    # shown the row highlighted on the document rather than told where it is. Keyed
+    # by file name, then page number. Rendered from the same helper the history
+    # route uses, so a run reopened from storage is built the same way as the one
+    # just produced.
     payload["page_images"] = _page_images_for_result(uploads, payload)
 
     # Filed against a client when one was chosen, with the documents it was run on.

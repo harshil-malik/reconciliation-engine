@@ -1,0 +1,46 @@
+name: Build macOS app
+
+# Build the macOS .app bundle on a real Mac runner and upload the zip.
+# Trigger it from the GitHub website: Actions tab -> "Build macOS app" -> Run workflow.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: macos-14   # Apple Silicon (arm64) runner
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Cache the large assets (llama-server binary + GGUF models) so re-runs
+      # don't re-download ~2.5 GB every time.
+      - name: Cache llama assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            desktop/bin
+            desktop/models
+          key: llama-assets-macos-v1
+
+      - name: Make build script executable
+        run: chmod +x build_macos.sh
+
+      - name: Build the app
+        run: ./build_macos.sh
+
+      - name: Upload macOS zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReconciliationEngine-macos
+          path: dist/ReconciliationEngine-macos.zip
+          retention-days: 30

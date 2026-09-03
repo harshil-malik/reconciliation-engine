@@ -22,3 +22,5 @@ desktop/bin/
 build/
 dist/
 *.zip
+# api/leads.js dependencies (mongodb, zod) — Vercel installs these itself on deploy.
+node_modules/

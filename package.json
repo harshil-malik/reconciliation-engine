@@ -1,0 +1,9 @@
+{
+  "name": "munim-landing",
+  "private": true,
+  "description": "Serverless functions backing the Munim AI landing page (lead capture for the Book a Demo flow). The site itself is plain static HTML — this exists only so Vercel installs the api/ function's dependencies.",
+  "dependencies": {
+    "mongodb": "^6.9.0",
+    "zod": "^3.23.8"
+  }
+}

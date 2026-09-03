@@ -203,3 +203,29 @@ Per the spec, PDF extraction is built and validated one bank at a time rather th
 a generic parser. To add one: create a class in `app/ingestion/bank_templates/`
 implementing `build_prompt()` and `parse_response()` (copy `hdfc.py`), then register
 it in `_BANK_TEMPLATES` in `app/main.py`. It appears in the UI dropdown automatically.
+
+## Landing page: "Book a demo"
+
+`landing.html` (kept identical to `index.html` at the repo root, so Vercel's static
+detection finds an entrypoint — see git history) is the public marketing page,
+deployed on Vercel separately from the desktop app above. Its `#demo` section posts
+to `api/leads.js`, a Vercel serverless function — the one part of this project that
+isn't local-first, since a public lead-capture form needs a server that's up when
+the visitor is, not a per-user offline install.
+
+To wire it up on a fresh deploy:
+
+1. **MongoDB Atlas** (free tier is enough) — leads land in the `munim` database's
+   `leads` collection. Set `MONGODB_URI` as a Vercel project env var.
+2. **Cal.com** — create a 30-min event type (e.g. named `munim-demo`), with a 15-min
+   buffer after, a cap of ~3 bookings/day, and reminders at 24h and 1h. Then edit the
+   `CAL_LINK` constant near the bottom of `landing.html` (and `index.html`) to your
+   event's link, e.g. `yourname/munim-demo`.
+3. **Telegram notify** (optional) — message `@BotFather`, `/newbot`, copy the token;
+   message your new bot once; open
+   `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy the `"chat":{"id": ...}`
+   value. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` as Vercel env vars. Without
+   these the lead is still saved to Mongo — you just don't get pinged.
+
+See `.env.example` for the full list of env vars `api/leads.js` reads, and
+`package.json` for the two npm dependencies (`mongodb`, `zod`) Vercel installs for it.

@@ -88,7 +88,14 @@ module.exports = async function handler(req, res) {
   }
 
   // Honeypot: bots fill hidden fields, humans don't see them to fill.
-  if (body.website) return res.status(200).json({ ok: true });
+  if (body.website) {
+    console.log("honeypot triggered, submission discarded", {
+      ip,
+      email: body.email,
+      hpValue: body.website,
+    });
+    return res.status(200).json({ ok: true });
+  }
 
   const lead = {
     name: body.name.trim(),
@@ -105,7 +112,8 @@ module.exports = async function handler(req, res) {
 
   try {
     const client = await getClient();
-    await client.db("munim").collection("leads").insertOne(lead);
+    const result = await client.db("munim").collection("leads").insertOne(lead);
+    console.log("lead saved", { email: lead.email, insertedId: String(result.insertedId) });
   } catch (e) {
     console.error("failed to save lead", e);
     return res.status(500).json({ error: "Could not save your request. Try again, or email us directly." });

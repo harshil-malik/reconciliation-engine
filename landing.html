@@ -575,7 +575,7 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
           <div class="mb-item">
             <button class="mb-trigger" id="t-support" aria-haspopup="true" aria-expanded="false" aria-controls="m-support">Support<svg class="mb-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
             <div class="mb-menu align-right" id="m-support" role="menu" aria-labelledby="t-support">
-              <a class="mb-link" role="menuitem" href="#faq"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><circle cx="12" cy="17.2" r=".9" fill="currentColor" stroke="none"/></svg><span><b>FAQ</b><i>Banks, GPUs, scanned PDFs</i></span></a>
+              <a class="mb-link" role="menuitem" href="#faq"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><circle cx="12" cy="17.2" r=".9" fill="currentColor" stroke="none"/></svg><span><b>FAQ</b><i>Banks, scanned PDFs, privacy</i></span></a>
               <a class="mb-link" role="menuitem" href="#why"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8.2 10.5V7.8a3.8 3.8 0 0 1 7.6 0v2.7"/></svg><span><b>Privacy posture</b><i>No API key, no outbound call</i></span></a>
               <div class="mb-sep" role="separator"></div>
               <a class="mb-link" role="menuitem" href="#contact"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m3.8 7 7.3 5.3a1.5 1.5 0 0 0 1.8 0L20.2 7"/></svg><span><b>Contact</b><i>Reach the person who built it</i></span></a>
@@ -791,14 +791,6 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
     </div>
     <div class="faq">
       <details open>
-        <summary>Does it work on Windows?<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
-        <div class="ans">Yes. The engine is pure Python — FastAPI, pandas, openpyxl, pypdf, httpx all ship Windows wheels, and llama.cpp has native Windows builds. Only the README's shell commands need translating: <code>py -3 -m venv</code>, <code>.venv\Scripts\Activate.ps1</code>, and two separate PowerShell windows instead of backgrounding with <code>&amp;</code>.</div>
-      </details>
-      <details>
-        <summary>Do I need a GPU?<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
-        <div class="ans">No, but a 3B model on CPU is slow — the default request timeout is 300 seconds for exactly that reason. On Windows with an NVIDIA card, a CUDA-enabled llama.cpp build is a large speedup. You can also skip the model servers entirely and get deterministic reconciliation only.</div>
-      </details>
-      <details>
         <summary>Which banks are supported?<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
         <div class="ans">HDFC today. PDF templates are built one bank at a time and validated against a real statement each, rather than shipping a generic parser that quietly misreads columns. Adding one means implementing <code>build_prompt()</code> and <code>parse_response()</code> and registering it — it then appears in the UI dropdown automatically.</div>
       </details>

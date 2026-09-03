@@ -438,31 +438,6 @@ table.mock .num{font-family:"JetBrains Mono",monospace;font-variant-numeric:tabu
 }
 .metric .lbl{font-size:.85rem;color:var(--dark-ink-2);margin-top:.7rem;max-width:20ch;}
 
-/* ---------- DOWNLOAD ---------- */
-.dl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;max-width:900px;}
-@media (max-width:720px){ .dl-grid{grid-template-columns:1fr;} }
-.dl{
-  display:block;text-decoration:none;background:var(--paper);
-  border:1px solid var(--line-2);border-radius:var(--r-lg);
-  padding:1.6rem;transition:border-color var(--t),background-color var(--t),transform var(--t);
-}
-.dl:hover{border-color:var(--g-600);background:#fff;transform:translateY(-2px);}
-.dl-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;}
-.dl-name{display:flex;align-items:center;gap:.55rem;font-family:"Newsreader",Georgia,serif;font-size:1.4rem;letter-spacing:-.015em;}
-.dl-name svg{width:19px;height:19px;flex:none;}
-.badge{
-  font-family:"Inter",sans-serif;font-size:.64rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
-  background:var(--green-tint);color:var(--g-800);padding:.18rem .48rem;border-radius:4px;
-}
-.dl-arrow{width:19px;height:19px;stroke:var(--ink-3);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:stroke var(--t),transform var(--t);}
-.dl:hover .dl-arrow{stroke:var(--g-800);transform:translateY(2px);}
-.dl-sub{display:block;margin-top:.8rem;font-size:.85rem;color:var(--ink-2);}
-.note{
-  display:flex;gap:.7rem;align-items:flex-start;margin-top:1.5rem;max-width:900px;
-  font-size:.875rem;color:var(--ink-2);background:var(--paper-2);
-  border:1px solid var(--line);border-radius:var(--r);padding:1rem 1.1rem;
-}
-.note svg{width:17px;height:17px;flex:none;stroke:var(--ink-3);fill:none;stroke-width:1.8;stroke-linecap:round;margin-top:.15rem;}
 
 /* ---------- FAQ ---------- */
 .faq{border-top:1px solid var(--line);}
@@ -598,15 +573,6 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
             </div>
           </div>
           <div class="mb-item">
-            <button class="mb-trigger" id="t-download" aria-haspopup="true" aria-expanded="false" aria-controls="m-download">Download<svg class="mb-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            <div class="mb-menu" id="m-download" role="menu" aria-labelledby="t-download">
-              <a class="mb-link" role="menuitem" href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-windows.zip"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.7 10.5 4.6v6.8H3Z"/><path d="M12.4 4.3 21 3v8.4h-8.6Z"/><path d="M3 12.6h7.5v6.8L3 18.3Z"/><path d="M12.4 12.6H21V21l-8.6-1.3Z"/></svg><span><b>Windows</b><i>Windows 10 / 11 · 64-bit · ~2.7 GB</i></span></a>
-              <a class="mb-link" role="menuitem" href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-macos.zip"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6c.9-1.9 2.8-2.8 4.2-2.8.2 1.9-.6 3.2-1.5 4.1"/><path d="M16.8 8.4c-1.4 0-2.2.7-3.3.7s-1.9-.7-3.1-.7C8.2 8.4 6 10.2 6 13.6c0 3.2 2.2 6.6 4.1 6.6 1 0 1.6-.6 2.9-.6s1.8.6 2.9.6c1.9 0 4.1-3.4 4.1-6.6 0-2.9-1.9-4.6-2.8-5.2Z"/></svg><span><b>macOS</b><i>Apple Silicon · Metal GPU · ~2.7 GB</i></span></a>
-              <div class="mb-sep" role="separator"></div>
-              <a class="mb-link" role="menuitem" href="#download"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6.8v10.4L12 21l8-3.8V6.8Z"/><path d="M4 6.8 12 10.6l8-3.8"/><path d="M12 10.6V21"/></svg><span><b>What you get</b><i>Bundled models, nothing downloads on launch</i></span></a>
-            </div>
-          </div>
-          <div class="mb-item">
             <button class="mb-trigger" id="t-support" aria-haspopup="true" aria-expanded="false" aria-controls="m-support">Support<svg class="mb-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
             <div class="mb-menu align-right" id="m-support" role="menu" aria-labelledby="t-support">
               <a class="mb-link" role="menuitem" href="#faq"><svg class="mb-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><circle cx="12" cy="17.2" r=".9" fill="currentColor" stroke="none"/></svg><span><b>FAQ</b><i>Banks, GPUs, scanned PDFs</i></span></a>
@@ -620,8 +586,7 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
           Menu
         </button>
-        <a class="btn btn-ghost nav-cta" href="#demo" style="min-height:40px;padding:.5rem 1.05rem;font-size:.88rem;">Book a demo</a>
-        <a class="btn btn-primary nav-cta" href="#download">Install it</a>
+        <a class="btn btn-primary nav-cta" href="#demo">Book a demo</a>
       </div>
     </nav>
   </div>
@@ -631,10 +596,6 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
       <a href="#pipeline">Pipeline</a>
       <a href="#why">Principles</a>
       <a href="#metrics">By the numbers</a>
-      <h6>Download</h6>
-      <a href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-windows.zip">Windows</a>
-      <a href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-macos.zip">macOS</a>
-      <a href="#download">What you get</a>
       <h6>Support</h6>
       <a href="#faq">FAQ</a>
       <a href="#why">Privacy posture</a>
@@ -653,13 +614,9 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
     <h1>Reconciliation that never leaves your laptop.</h1>
     <p class="dek">Munim AI takes the reconciliation labour off a chartered accountant's plate — matching statements to ledgers, catching the anomalies a spreadsheet misses, exporting an audit-ready report where every row explains itself — so your hours go to the judgment calls you actually trained for.</p>
     <div class="cta-row">
-      <a class="btn btn-primary" href="#download">
-        <svg viewBox="0 0 24 24"><path d="M12 3v13"/><path d="M7 12l5 5 5-5"/><path d="M4 21h16"/></svg>
-        Install it
-      </a>
+      <a class="btn btn-primary" href="#demo">Book a demo</a>
       <a class="btn btn-ghost" href="#pipeline">See how it works</a>
-      <a class="btn btn-ghost" href="#demo">Book a demo</a>
-      <span class="cta-note">Windows &amp; macOS · no Python, no terminal</span>
+      <span class="cta-note">30 minutes · on your own data</span>
     </div>
 
     <div class="rv showcase">
@@ -823,48 +780,6 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
   </div>
 </section>
 
-<!-- DOWNLOAD -->
-<section id="download">
-  <div class="wrap">
-    <div class="rv sec-head">
-      <div>
-        <span class="eyebrow">Download</span>
-        <h2>Unzip and run. That's it.</h2>
-      </div>
-      <p class="sub">No Python, no terminal, no dependencies. Download the zip for your platform, unzip it, and double-click the app. The AI models are bundled — nothing downloads on first launch.</p>
-    </div>
-
-    <div class="rv dl-grid">
-      <a class="dl" href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-windows.zip">
-        <span class="dl-top">
-          <span class="dl-name">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 5.5l8-1.2v7.2H3zM13 4l8-1.2v8.7h-8zM3 12.5h8v7.2l-8-1.2zM13 12.5h8v8.7L13 20z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            Windows <span class="badge">available</span>
-          </span>
-          <svg class="dl-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13"/><path d="M7 12l5 5 5-5"/><path d="M4 21h16"/></svg>
-        </span>
-        <span class="dl-sub">Windows 10 / 11 · 64-bit · ~2.7 GB · GPU accelerated (Vulkan)</span>
-      </a>
-
-      <a class="dl" href="https://huggingface.co/datasets/shreyanfr/reconciliation-engine/resolve/main/ReconciliationEngine-macos.zip">
-        <span class="dl-top">
-          <span class="dl-name">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 6c1-2 3-3 4.5-3 .2 2-.6 3.4-1.6 4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M17 8.5c-1.5 0-2.4.8-3.5.8S11 8.5 9.7 8.5C7.4 8.5 5 10.4 5 14c0 3.4 2.4 7 4.4 7 1.1 0 1.7-.7 3.1-.7s1.9.7 3.1.7c2 0 4.4-3.6 4.4-7 0-3.1-2-4.9-3-5.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            macOS <span class="badge">available</span>
-          </span>
-          <svg class="dl-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13"/><path d="M7 12l5 5 5-5"/><path d="M4 21h16"/></svg>
-        </span>
-        <span class="dl-sub">Apple Silicon · Metal GPU · ~2.7 GB</span>
-      </a>
-    </div>
-
-    <div class="note">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>
-      <span>Unzip the archive and run <strong>ReconciliationEngine\ReconciliationEngine.exe</strong>. On first launch it loads the AI models onto the GPU — this takes around 15 seconds. Nothing leaves the machine.</span>
-    </div>
-  </div>
-</section>
-
 <!-- FAQ -->
 <section id="faq">
   <div class="wrap">
@@ -998,12 +913,9 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
   <div class="wrap">
     <div class="rv band">
       <h2>Give the grunt work to the machine.</h2>
-      <p>Download it, point it at a statement and a ledger, and keep the judgment calls for yourself.</p>
+      <p>Point it at a statement and a ledger, and keep the judgment calls for yourself.</p>
       <div class="cta-row">
-        <a class="btn btn-green" href="#download">
-          <svg viewBox="0 0 24 24"><path d="M12 3v13"/><path d="M7 12l5 5 5-5"/><path d="M4 21h16"/></svg>
-          Install it
-        </a>
+        <a class="btn btn-green" href="#demo">Book a demo</a>
       </div>
     </div>
   </div>
@@ -1023,13 +935,12 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
         <a href="#pipeline">Pipeline</a>
         <a href="#why">Principles</a>
         <a href="#metrics">By the numbers</a>
-        <a href="#download">Download</a>
+        <a href="#demo">Book a demo</a>
       </div>
       <div class="foot-col">
         <h5>Details</h5>
         <a href="#faq">FAQ</a>
         <a href="#why">Privacy posture</a>
-        <a href="#download">Supported platforms</a>
         <a href="#contact">Contact</a>
       </div>
     </div>
@@ -1302,7 +1213,7 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
         if(t) t.classList.add('active');
       });
     }, { rootMargin:'-74px 0px -60% 0px', threshold:0 });
-    ['pipeline','why','metrics','download','faq','demo','contact'].forEach(function(id){
+    ['pipeline','why','metrics','faq','demo','contact'].forEach(function(id){
       var el = document.getElementById(id); if(el) io.observe(el);
     });
   }

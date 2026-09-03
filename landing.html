@@ -936,16 +936,19 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
           <textarea id="d-pain" name="painText" rows="3" maxlength="1000"></textarea>
         </div>
 
-        <!-- honeypot — hidden from humans, bots fill it. Do not remove.
-             Named away from any recognizable autofill category (not "website"/"url"/
-             "company") — a real lead was lost in testing to Chrome silently filling a
-             honeypot named "website" via autofill, which reads as a bot to the server
-             and gets the submission discarded with no error shown to the visitor. -->
-        <input class="demo-hp" type="text" name="hp_leave_blank" id="d-hp-leave-blank" tabindex="-1" autocomplete="off" aria-hidden="true" />
-
         <button class="btn btn-green demo-submit" type="submit" id="demo-submit" disabled>Book a demo</button>
         <p class="demo-error" id="demo-error" role="alert" hidden></p>
       </form>
+
+      <!-- honeypot — hidden from humans, bots fill it. Do not remove.
+           Deliberately kept OUTSIDE the <form> above (read by id via JS at submit
+           time, since submission goes through fetch() rather than a native form
+           post): a real lead was lost in testing to Chrome's saved-address autofill
+           silently filling this field with a leftover address value ("Haryana") —
+           Chrome groups and fills every text input inside a <form> it reads as an
+           address/contact form, regardless of the field's name or autocomplete
+           attribute. Outside the form boundary, it's excluded from that grouping. -->
+      <input class="demo-hp" type="text" name="hp_leave_blank" id="d-hp-leave-blank" tabindex="-1" autocomplete="off" aria-hidden="true" />
 
       <div class="demo-cal" id="demo-cal" hidden>
         <span class="eyebrow">Pick a time</span>
@@ -1411,7 +1414,7 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
         painText: form.painText.value.trim(),
         source: form.dataset.source || 'landing-demo',
         utm: getUtm(),
-        website: form.hp_leave_blank.value
+        website: document.getElementById('d-hp-leave-blank').value
       })
     }).then(function(res){
       if(!res.ok){

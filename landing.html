@@ -936,8 +936,12 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
           <textarea id="d-pain" name="painText" rows="3" maxlength="1000"></textarea>
         </div>
 
-        <!-- honeypot — hidden from humans, bots fill it. Do not remove. -->
-        <input class="demo-hp" type="text" name="website" id="d-website" tabindex="-1" autocomplete="off" aria-hidden="true" />
+        <!-- honeypot — hidden from humans, bots fill it. Do not remove.
+             Named away from any recognizable autofill category (not "website"/"url"/
+             "company") — a real lead was lost in testing to Chrome silently filling a
+             honeypot named "website" via autofill, which reads as a bot to the server
+             and gets the submission discarded with no error shown to the visitor. -->
+        <input class="demo-hp" type="text" name="hp_leave_blank" id="d-hp-leave-blank" tabindex="-1" autocomplete="off" aria-hidden="true" />
 
         <button class="btn btn-green demo-submit" type="submit" id="demo-submit" disabled>Book a demo</button>
         <p class="demo-error" id="demo-error" role="alert" hidden></p>
@@ -1408,7 +1412,7 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
         painText: form.painText.value.trim(),
         source: form.dataset.source || 'landing-demo',
         utm: getUtm(),
-        website: form.website.value
+        website: form.hp_leave_blank.value
       })
     }).then(function(res){
       if(!res.ok){

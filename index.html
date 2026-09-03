@@ -1344,10 +1344,9 @@ footer{border-top:1px solid var(--line);padding:clamp(3rem,6vw,4.5rem) 0 2.5rem;
   var form = document.getElementById('demo-form');
   if(!form) return;
 
-  // TODO: replace with your real Cal.com event link (Settings -> Event Types),
-  // e.g. "yourname/munim-demo". The event type this points at should be a 30-min
-  // slot with a 15-min buffer, max 3 bookings/day, and reminders at 24h and 1h.
-  var CAL_LINK = 'REPLACE_WITH_YOUR_CAL_LINK/munim-demo';
+  // The munim-demo event type: 30-min slot, 15-min buffer after, 3 bookings/day
+  // max, reminders at 24h and 1h before (see docs/README for how it's configured).
+  var CAL_LINK = 'harshil-malik-pg3jih/munim-demo';
 
   var sizeBtns = Array.prototype.slice.call(document.querySelectorAll('#d-sizes .size'));
   var submitBtn = document.getElementById('demo-submit');

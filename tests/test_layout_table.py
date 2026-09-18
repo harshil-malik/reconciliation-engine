@@ -295,3 +295,181 @@ def test_page_offsets_put_a_row_on_the_right_page() -> None:
 
     assert rows is not None
     assert [r["source_page"] for r in rows] == [1, 2]
+
+
+# --- Layouts beyond HDFC's -----------------------------------------------------
+# Each block below is one Indian bank's actual column arrangement. They are here
+# because each one, before these cases existed, either sent a perfectly aligned
+# statement to the model or — worse — parsed it into the wrong answer.
+
+_SPACED_DATES = """\
+STATE BANK OF INDIA
+
+Txn Date      Value Date    Description                             Ref No./Cheque No.      Debit          Credit         Balance
+-----------------------------------------------------------------------------------------------------------------------------------
+01 Jul 2026   01 Jul 2026   TO TRANSFER-UPI/DR/500584440248/RAJESH  UPI2241              12,450.00                     1,17,550.00
+02 Jul 2026   02 Jul 2026   BY TRANSFER-NEFT*HDFC0000456*AMAZON     NFT8340                             8,340.50       1,25,890.50
+"""
+
+
+def test_dates_printed_with_a_spaced_month_are_read() -> None:
+    """SBI prints "01 Jul 2026", with spaces rather than separators. A date pattern
+    requiring / or - sees no rows at all and sends the whole statement to the model."""
+    rows = parse_layout_table(_SPACED_DATES)
+    assert rows is not None
+
+    assert [row["date"] for row in rows] == ["01 Jul 2026", "02 Jul 2026"]
+    assert rows[0]["debit"] == "12,450.00" and rows[0]["credit"] == "0"
+    assert rows[1]["credit"] == "8,340.50" and rows[1]["debit"] == "0"
+
+
+_LEADING_SERIAL = """\
+ICICI BANK LIMITED
+
+No.   Transaction Date   Value Date   Cheque Number   Transaction Remarks             Withdrawal Amount (INR)   Deposit Amount (INR)   Balance (INR)
+-------------------------------------------------------------------------------------------------------------------------------------------------
+1     01-07-2026         01-07-2026   -               UPI/500584440248/RAJESH KUM                   12,450.00                            1,17,550.00
+2     02-07-2026         02-07-2026   -               NEFT-NFT8340-AMAZON SELLER                                          8,340.50       1,25,890.50
+"""
+
+
+def test_rows_beginning_with_a_serial_number_are_read() -> None:
+    """ICICI, PNB and Bank of Baroda all number their rows, so the date is not at
+    the start of the line. Anchoring the search to the line start made every row on
+    those statements invisible."""
+    rows = parse_layout_table(_LEADING_SERIAL)
+    assert rows is not None
+
+    assert [row["date"] for row in rows] == ["01-07-2026", "02-07-2026"]
+    assert rows[0]["debit"] == "12,450.00"
+    assert rows[1]["credit"] == "8,340.50"
+
+
+def test_a_placeholder_in_the_reference_column_is_not_a_reference() -> None:
+    """ICICI prints "-" under Cheque Number on every non-cheque row. Kept as a
+    value it reads as an exact reference match between unrelated transactions."""
+    rows = parse_layout_table(_LEADING_SERIAL)
+    assert rows is not None
+
+    assert all(row["reference"] is None for row in rows)
+
+
+_AMOUNT_AND_TYPE = """\
+PUNJAB NATIONAL BANK
+
+Sl. No.      Transaction Date      Instrument Id           Amount   Type            Balance   Remarks
+------------------------------------------------------------------------------------------------------------------------
+1            01-07-2026            UPI2241              12,450.00   Dr          1,17,550.00   UPI/500584440248/RAJESH KUMAR TRADERS
+2            02-07-2026            NFT8340               8,340.50   Cr          1,25,890.50   NEFT/NFT8340/AMAZON SELLER SERVICES
+"""
+
+
+def test_one_amount_column_with_a_type_column_carries_the_direction() -> None:
+    """PNB prints no debit and no credit column: a single Amount column holds every
+    figure and a Type column says Dr or Cr. Column position carries no direction at
+    all here, so the table was rejected outright."""
+    rows = parse_layout_table(_AMOUNT_AND_TYPE)
+    assert rows is not None
+
+    assert rows[0]["debit"] == "12,450.00" and rows[0]["credit"] == "0"
+    assert rows[1]["credit"] == "8,340.50" and rows[1]["debit"] == "0"
+
+
+def test_a_narration_column_after_the_money_columns_still_reads() -> None:
+    """PNB puts Remarks last, after Amount, Type and Balance. Bounding the narration
+    at the money position there makes the slice run backwards and empties it."""
+    rows = parse_layout_table(_AMOUNT_AND_TYPE)
+    assert rows is not None
+
+    assert rows[0]["description"] == "UPI/500584440248/RAJESH KUMAR TRADERS"
+    assert rows[1]["description"] == "NEFT/NFT8340/AMAZON SELLER SERVICES"
+
+
+_MERGED_MONEY_COLUMN = """\
+KOTAK MAHINDRA BANK LTD
+
+Date           Narration                              Chq/Ref No      Withdrawal(Dr)/Deposit(Cr)             Balance
+-------------------------------------------------------------------------------------------------------------------------
+01-07-2026     UPI/500584440248/RAJESH KUMAR          UPI2241                      12,450.00(Dr)     1,17,550.00(Cr)
+02-07-2026     NEFT/NFT8340/AMAZON SELLER             NFT8340                       8,340.50(Cr)     1,25,890.50(Cr)
+"""
+
+
+def test_a_single_money_column_takes_its_direction_from_the_inline_tag() -> None:
+    """Kotak merges withdrawal and deposit into one column and tags each figure
+    (Dr) or (Cr). First-keyword-wins classified that heading as a debit column,
+    which booked every deposit as a withdrawal — a wrong answer, not a fallback."""
+    rows = parse_layout_table(_MERGED_MONEY_COLUMN)
+    assert rows is not None
+
+    assert rows[0]["debit"] == "12,450.00" and rows[0]["credit"] == "0"
+    assert rows[1]["credit"] == "8,340.50" and rows[1]["debit"] == "0"
+    assert rows[1]["balance"] == "1,25,890.50"
+
+
+_CHEQUE_COLUMN_BEFORE_PARTICULARS = """\
+AXIS BANK LTD
+
+Tran Date     Chq No        Particulars                                    Debit         Credit         Balance   Init. Br
+--------------------------------------------------------------------------------------------------------------------------
+01-07-2026                  UPI/P2A/500584440248/RAJESH KUMAR          12,450.00                    1,17,550.00   KORMNGL
+07-07-2026    CHQ0452       CHQ DEP-CHQ0452                                          24,900.00      1,42,450.00   KORMNGL
+"""
+
+
+def test_an_empty_cheque_column_does_not_borrow_the_narration() -> None:
+    """Axis puts Chq No BEFORE Particulars and leaves it blank on non-cheque rows.
+    Reading the cell all the way to the figures swallowed the narration and returned
+    its first word as the reference."""
+    rows = parse_layout_table(_CHEQUE_COLUMN_BEFORE_PARTICULARS)
+    assert rows is not None
+
+    assert rows[0]["reference"] is None
+    assert rows[0]["description"] == "UPI/P2A/500584440248/RAJESH KUMAR"
+    assert rows[1]["reference"] == "CHQ0452"
+
+
+_VALUE_DATE_AFTER_REFERENCE = """\
+HDFC BANK LTD
+
+Date        Narration                          Chq./Ref.No.      Value Dt     Withdrawal Amt.     Deposit Amt.     Closing Balance
+-----------------------------------------------------------------------------------------------------------------------------------
+18/07/26    ATW-421345XXXXXX1234-KORAMANGALA                     18/07/26           10,000.00                          2,08,397.25
+21/07/26    RTGS DR-BARB0000890-MAHESH ELEC    RTG3300           21/07/26           33,050.00                          1,75,347.25
+"""
+
+
+def test_a_value_date_never_becomes_the_reference() -> None:
+    """"Value Dt" is not a heading this recognises, so on a row carrying no
+    reference the value date fell into the reference cell — giving every
+    transaction dated that day an identical "reference", which is the strongest
+    false-match signal the matcher has."""
+    rows = parse_layout_table(_VALUE_DATE_AFTER_REFERENCE)
+    assert rows is not None
+
+    assert rows[0]["reference"] is None
+    assert rows[1]["reference"] == "RTG3300"
+
+
+_TALLY_LEDGER = """\
+SAMPLE ENTERPRISES PVT LTD
+Ledger Account
+
+Date           Particulars                                     Vch Type      Vch No.         Debit             Credit
+----------------------------------------------------------------------------------------------------------------------
+1-Jul-2026     Rajesh Kumar Traders - purchase invoice         Payment       UPI2241                        12,450.00
+2-Jul-2026     Amazon Marketplace - settlement received        Receipt       NFT8340       8,340.50
+"""
+
+
+def test_tally_voucher_columns_are_read_and_kept_out_of_the_narration() -> None:
+    """TallyPrime abbreviates to "Vch Type" and "Vch No.". Neither was recognised,
+    so the voucher number was lost and its type ("Payment", "Receipt") ended up
+    inside the description — noise in exactly the text Stage 1 and Stage 2 match on."""
+    rows = parse_layout_table(_TALLY_LEDGER)
+    assert rows is not None
+
+    assert rows[0]["description"] == "Rajesh Kumar Traders - purchase invoice"
+    assert rows[0]["reference"] == "UPI2241"
+    assert rows[1]["description"] == "Amazon Marketplace - settlement received"
+    assert rows[1]["reference"] == "NFT8340"

@@ -8,13 +8,39 @@ from typing import Optional
 _COLUMN_KEYWORDS: dict[str, tuple[str, ...]] = {
     "date": ("date", "txn date", "transaction date", "value date"),
     "description": ("narration", "particulars", "description", "details", "remarks"),
-    "reference": ("chq", "cheque", "ref", "reference", "voucher", "utr", "instrument"),
+    # TallyPrime prints "Vch Type" (Payment, Receipt, Contra) beside "Vch No.".
+    # Classified before reference so the abbreviation does not read as the voucher
+    # NUMBER, and given a column of its own so it bounds the narration — left
+    # undetected it lands inside the description, where "Payment" and "Receipt"
+    # are noise in exactly the text Stage 1 and Stage 2 match on.
+    "voucher_type": ("vch type", "voucher type"),
+    "reference": ("chq", "cheque", "ref", "reference", "voucher", "vch", "utr", "instrument"),
     "debit": ("withdrawal", "debit", "dr", "payments", "paid"),
     "credit": ("deposit", "credit", "cr", "receipts", "received"),
     "balance": ("balance", "closing balance", "running balance"),
+    # Checked last, and deliberately so. "Withdrawal Amount (INR)" and "Deposit
+    # Amount (INR)" both contain "amount" and both are direction-bearing columns
+    # that must classify as debit and credit; only a heading offering nothing more
+    # specific — PNB's bare "Amount" — should fall through to here.
+    "amount": ("amount", "amt"),
 }
 
-_DATE_START = re.compile(r"^\s*(\d{1,2}[/-][A-Za-z0-9]{2,3}[/-]\d{2,4})")
+# The Dr/Cr indicator column, matched against the WHOLE heading rather than by
+# keyword search. A keyword would also hit "Vch Type" in a Tally ledger, and that
+# column holds voucher types (Payment, Receipt, Contra), not directions.
+_DIRECTION_HEADINGS = frozenset({"type", "dr/cr", "cr/dr", "dr / cr"})
+
+# Two shapes: separated (01/07/2026, 01-07-26, 01-Jul-2026) and spaced with an
+# alphabetic month (01 Jul 2026), which is how SBI prints every transaction date.
+# The spaced form requires letters for the month — accepting "01 07 2026" too would
+# let a narration's "INV 3312 2026" read as a date.
+_DATE_PATTERN = (
+    r"\d{1,2}[/-][A-Za-z0-9]{2,3}[/-]\d{2,4}"
+    r"|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}"
+)
+_DATE_START = re.compile(rf"^\s*({_DATE_PATTERN})")
+_DATE_TOKEN = re.compile(rf"({_DATE_PATTERN})")
+_DR_CR = re.compile(r"\b(dr|cr)\b", re.I)
 _AMOUNT = re.compile(r"\d[\d,]*\.\d{2}|\d[\d,]*(?=\s|$)")
 # "Opening Balance : 1,30,000.00" / "Balance B/F 1,30,000.00" and similar.
 _OPENING_BALANCE = re.compile(
@@ -28,6 +54,12 @@ _OPENING_BALANCE = re.compile(
 # character gap between adjacent money columns stays unambiguous.
 _COLUMN_TOLERANCE = 12
 
+# Dates are left-aligned under a left-aligned heading, so a row's date starts where
+# its column starts. Much tighter than _COLUMN_TOLERANCE, which exists to absorb the
+# drift of right-aligned money values: a loose window here would let text early in a
+# narration pass as the row's date.
+_DATE_COLUMN_TOLERANCE = 4
+
 
 class _Column:
     __slots__ = ("name", "start", "end")
@@ -40,10 +72,23 @@ def _classify(cell_text: str) -> Optional[str]:
     normalized = cell_text.strip().lower()
     if not normalized:
         return None
-    for column, keywords in _COLUMN_KEYWORDS.items():
-        for keyword in keywords:
-            if re.search(rf"\b{re.escape(keyword)}\b", normalized):
-                return column
+    if normalized in _DIRECTION_HEADINGS:
+        return "type"
+    matched = {
+        column
+        for column, keywords in _COLUMN_KEYWORDS.items()
+        if any(re.search(rf"\b{re.escape(keyword)}\b", normalized) for keyword in keywords)
+    }
+    # A heading naming BOTH directions is one merged money column, not a debit
+    # column that happens to mention deposits: Kotak prints
+    # "Withdrawal(Dr)/Deposit(Cr)" over a single column and tags each figure (Dr)
+    # or (Cr) inline. Classifying it as debit — which first-keyword-wins does —
+    # books every deposit as a withdrawal and silently inverts half the statement.
+    if "debit" in matched and "credit" in matched:
+        return "signed_amount"
+    for column in _COLUMN_KEYWORDS:
+        if column in matched:
+            return column
     return None
 
 
@@ -78,10 +123,65 @@ def _find_header(lines: list[str]) -> Optional[tuple[int, dict[str, _Column]]]:
             continue
         # A real transaction table needs a date, something to describe the row, and
         # at least one money column. Without those it is a metadata block, not a table.
-        if "date" in columns and ("debit" in columns or "credit" in columns):
+        # The money column is usually a Debit/Credit pair, but PNB prints neither:
+        # one "Amount" column carries every figure and a "Type" column says which
+        # direction it moved. That is still a transaction table, and refusing it
+        # sends an otherwise perfectly aligned statement to the model.
+        has_money = (
+            "debit" in columns
+            or "credit" in columns
+            or "signed_amount" in columns
+            or ("amount" in columns and "type" in columns)
+        )
+        if "date" in columns and has_money:
             if "description" in columns or "balance" in columns:
                 return index, columns
     return None
+
+
+def _date_at(line: str, columns: dict[str, _Column]) -> Optional[re.Match]:
+    """Find the row's date at the DATE COLUMN, rather than at the start of the line.
+
+    ICICI, PNB and Bank of Baroda all lead with a serial-number column, so a
+    transaction row reads "1   01-07-2026  ...". Anchoring to the line start makes
+    every such row invisible, no rows parse, and a perfectly aligned statement goes
+    to the model. Anchoring to the column the header itself declared reads them.
+
+    Still refuses a wrapped narration that happens to contain a date: that text sits
+    in the description column, which is not where this looks.
+    """
+    column = columns.get("date")
+    if column is None:
+        return _DATE_START.match(line)
+    for match in _DATE_TOKEN.finditer(line):
+        # Ordered left to right, so once past the column there is nothing to find.
+        if match.start() > column.start + _DATE_COLUMN_TOLERANCE:
+            return None
+        if abs(match.start() - column.start) <= _DATE_COLUMN_TOLERANCE:
+            return match
+    return None
+
+
+def _direction_at(line: str, column: Optional[_Column]) -> Optional[str]:
+    """Read Dr or Cr out of a direction column's cell, where the table has one.
+
+    Narrow window: the cell holds two letters, and reaching further risks picking up
+    a "Cr" printed alongside the balance or inside the narration.
+    """
+    if column is None:
+        return None
+    match = _DR_CR.search(line[max(0, column.start - 4) : column.end + 4])
+    return match.group(1).lower() if match else None
+
+
+def _inline_direction(line: str, token_end: int) -> Optional[str]:
+    """Read a Dr/Cr tag printed on the figure itself, as "12,450.00(Dr)".
+
+    Looks only just past the number: the tag is attached to it, and reaching
+    further would pick up the Cr that a neighbouring balance carries.
+    """
+    match = _DR_CR.search(line[token_end : token_end + 6])
+    return match.group(1).lower() if match else None
 
 
 def _assign_amount(token_end: int, money_columns: list[_Column]) -> Optional[str]:
@@ -125,8 +225,14 @@ def _printed_totals(lines: list[str]) -> dict[str, str]:
     return totals
 
 
+# A reference cell holding only a placeholder carries no reference. ICICI prints
+# "-" in Cheque Number on every non-cheque row; kept as a value it reads as an exact
+# reference match between unrelated transactions.
+_REFERENCE_PLACEHOLDERS = frozenset({"na", "n/a", "nil", "none", "-", "--"})
+
+
 def _reference_at(
-    line: str, columns: dict[str, _Column], first_money_start: int
+    line: str, columns: dict[str, _Column], money_start: int
 ) -> Optional[str]:
     """Read the cheque/reference cell, whole and without swallowing its neighbour.
 
@@ -141,13 +247,32 @@ def _reference_at(
     `0000000000` on that statement. Kept as a value it would read as an exact
     reference match between unrelated transactions, which is the strongest matching
     signal there is, so it is treated as absent.
+
+    The cell ends at the next detected column, falling back to the first figure on
+    the line. Running to the figures unconditionally assumes the reference column
+    sits immediately before them, which two of these layouts break: Axis puts Chq No
+    BEFORE Particulars, so the slice swallowed the narration and returned its first
+    word as the reference, and Bank of Baroda leaves so little gap that the slice
+    caught the leading digits of the debit figure ("12,4").
     """
     if "reference" not in columns:
         return None
 
-    cell = line[columns["reference"].start : first_money_start]
+    start = columns["reference"].start
+    following = [
+        column.start
+        for name, column in columns.items()
+        if name != "reference" and column.start > start
+    ]
+    cell = line[start : min(following + [money_start])]
     token = cell.split(maxsplit=1)[0] if cell.split() else ""
-    if not token or set(token) <= {"0"}:
+    if not token or set(token) <= {"0"} or token.lower() in _REFERENCE_PLACEHOLDERS:
+        return None
+    # A date is never a reference. HDFC prints an undetectable "Value Dt" column
+    # right of Chq./Ref.No., so on a row carrying no reference the value date fell
+    # into this cell — giving every transaction dated the same day an identical
+    # "reference", which is the strongest false-match signal the matcher has.
+    if _DATE_TOKEN.fullmatch(token):
         return None
     return token
 
@@ -233,7 +358,17 @@ def parse_layout_table(
     if opening_balance is None:
         opening_balance = printed_totals.get("opening")
 
-    money_columns = [columns[name] for name in ("debit", "credit", "balance") if name in columns]
+    # "Amount" is a money column only when it is THE money column. Where a statement
+    # prints Debit and Credit as well, an Amount heading means something else, and
+    # letting it claim a value would steal the figure from the column that owns it.
+    money_names = ("debit", "credit", "balance")
+    if "debit" not in columns and "credit" not in columns:
+        money_names = (
+            ("signed_amount", "balance")
+            if "signed_amount" in columns
+            else ("amount", "balance")
+        )
+    money_columns = [columns[name] for name in money_names if name in columns]
     if not money_columns:
         return None
     first_money_start = min(column.start for column in money_columns)
@@ -243,7 +378,7 @@ def parse_layout_table(
         if not line.strip():
             continue
 
-        date_match = _DATE_START.match(line)
+        date_match = _date_at(line, columns)
         if not date_match:
             # A line with no leading date is a wrapped narration belonging to the row
             # above — never its own transaction. It must be indented into the
@@ -278,7 +413,14 @@ def parse_layout_table(
                 and description_start > 0
                 and indent >= description_start - 2
             ):
-                extra = line[:first_money_start].strip()
+                # PNB puts Remarks last, after Amount, Type and Balance, so its
+                # wrapped narration continues to the RIGHT of the figures, not to
+                # the left of them.
+                extra = (
+                    line[description_start:].strip()
+                    if description_start > first_money_start
+                    else line[:first_money_start].strip()
+                )
                 if extra:
                     rows[-1]["description"] = f"{rows[-1]['description']} {extra}".strip()
                     # The citation must cover every line the description was built
@@ -302,6 +444,7 @@ def parse_layout_table(
         # best with that column's right edge. Iterating tokens and letting the first
         # one claim a column lets a stray value seize the slot the real figure wants.
         values: dict[str, str] = {}
+        assigned: dict[str, re.Match] = {}
         claimed: set[int] = set()
         for column in money_columns:
             best, best_distance = None, _COLUMN_TOLERANCE + 1
@@ -314,6 +457,24 @@ def parse_layout_table(
             if best is not None:
                 claimed.add(best)
                 values[column.name] = candidates[best].group()
+                assigned[column.name] = candidates[best]
+
+        # A figure in a bare Amount column carries no direction of its own, so read
+        # it from the Type cell alongside. A row whose Type is unreadable has no
+        # direction at all, and guessing one would turn a payment into a receipt —
+        # so the figure is dropped and the row fails the has_amount test below,
+        # rather than being booked backwards.
+        if "amount" in values or "signed_amount" in values:
+            if "signed_amount" in values:
+                amount = values.pop("signed_amount")
+                direction = _inline_direction(line, assigned["signed_amount"].end())
+            else:
+                amount = values.pop("amount")
+                direction = _direction_at(line, columns.get("type"))
+            if direction == "dr":
+                values["debit"] = amount
+            elif direction == "cr":
+                values["credit"] = amount
 
         earliest_money_start = (
             min(candidates[i].start() for i in claimed) if claimed else None
@@ -342,14 +503,26 @@ def parse_layout_table(
             # Money columns are bounded by where their VALUE starts, below — a value
             # wider than its heading begins to the left of it, so using the heading
             # position here would cut the narration short.
-            if name not in ("debit", "credit", "balance") and column.start > description_start
+            if name not in ("debit", "credit", "amount", "signed_amount", "balance")
+            and column.start > description_start
         ]
-        boundaries.append(
+        money_boundary = (
             earliest_money_start if earliest_money_start is not None else first_money_start
         )
-        description = line[description_start : min(boundaries)].strip()
+        # Only where the figures sit to the RIGHT of the narration. On PNB's layout
+        # the Remarks column comes last, after Amount, Type and Balance; bounding the
+        # narration at the money position there makes the slice run backwards and
+        # empties every description on the statement.
+        if money_boundary > description_start:
+            boundaries.append(money_boundary)
+        end = min(boundaries) if boundaries else len(line)
+        description = line[description_start:end].strip()
 
-        reference = _reference_at(line, columns, first_money_start)
+        reference = _reference_at(
+            line,
+            columns,
+            earliest_money_start if earliest_money_start is not None else first_money_start,
+        )
 
         has_amount = "debit" in values or "credit" in values
         # An opening-balance line is dated and sits in the table like a transaction,

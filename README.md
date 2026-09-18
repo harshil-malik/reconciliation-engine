@@ -10,15 +10,66 @@ API key, and client financial data never leaves the machine doing the reconcilia
 
 See `reconciliation-engine-spec.md` for the design rationale behind each stage.
 
+Seven bank statement layouts are supported today: **HDFC, SBI, ICICI, PNB, Bank of
+Baroda, Axis and Kotak Mahindra**, each built and validated against a real statement
+rather than guessed at by a generic parser.
+
+## See it work
+
+**Two minutes, and no model download.** The whole walkthrough below runs with no
+llama.cpp server started — verified, not assumed: with both model URLs pointed at
+dead ports the HDFC sample still reconciles to `UNEXPLAINED 0.00` with all 14 pairs
+matched. Stages 1, 1.5 and 3 use no model, and a text-layer PDF is read by a
+deterministic table reader that locates each cell under its column heading. The model
+is a fallback — for statements that reader cannot parse, and for the Stage 2 backstop,
+which fails soft by leaving its rows for review.
+
+Set the models up later, from [Setup](#setup), when you need either.
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python scripts/make_bank_samples.py     # a statement/ledger pair per bank
+uvicorn app.main:app --port 8000
+```
+
+Open http://127.0.0.1:8000, upload `sample_data/hdfc/hdfc_bank_statement.pdf` and
+`sample_data/hdfc/hdfc_ledger.pdf`, and pick the HDFC template.
+
+**The number to look at is `UNEXPLAINED` on the Summary tab. It must read `0.00`.**
+That is the balancing proof: every rupee on either side is either matched to its
+counterpart or explained as a specific unmatched row. Anything else means a row was
+mismatched, double-counted or dropped, and no amount of plausible-looking output
+elsewhere in the workbook makes up for it.
+
+On this sample you should see 14 matched, one legitimately unmatched row per side
+(an SMS charge the ledger never recorded, and a cheque issued but not presented),
+and four anomalies — including a duplicate payment whose two legs both reconcile
+perfectly, which is exactly the kind of thing matching alone will never surface.
+
 ## Pipeline
 
-| Stage | What it does | Module |
-| --- | --- | --- |
-| 0 — Ingestion | CSV / Excel / PDF → canonical `Transaction` schema | `app/ingestion/` |
-| 1 — Deterministic matching | Exact amount → date tolerance → fuzzy description tiebreak. No AI, fully explainable. | `app/matching/` |
-| 2 — AI matching net | Only Stage 1's leftovers: embeddings shortlist, then LLM confirmation with a reasoning string. | `app/ai_matching/` |
-| 3 — Anomaly detection | Duplicates, threshold avoidance, round numbers, reversals, timing gaps — across the *full* reconciled set. | `app/anomaly/` |
-| Report | One `.xlsx`, four tabs: Matched / AI Matched / Unmatched / Anomalies. | `app/report/` |
+| Stage | What it does | Model? | Module |
+| --- | --- | --- | --- |
+| 0 — Ingestion | CSV / Excel / PDF → canonical `Transaction` schema | PDF only | `app/ingestion/` |
+| 1 — Deterministic matching | Exact amount → date tolerance → description tiebreak | No | `app/matching/` |
+| 1.5 — Near-matching | Fee- or rounding-sized gaps where both sides name the same counterparty | No | `app/matching/near_matcher.py` |
+| 2 — AI matching net | Stage 1.5's leftovers: embeddings shortlist, then LLM confirmation with a reasoning string | Yes | `app/ai_matching/` |
+| 3 — Anomaly detection | Duplicates, threshold avoidance, round numbers, reversals, timing gaps — across the *full* reconciled set | No | `app/anomaly/` |
+| Report | One `.xlsx`, nine tabs, organised by what a reviewer must *do* | — | `app/report/` |
+
+**The model does very little.** Stage 1.5 matches on the words that identify a
+counterparty rather than on how alike two strings look, which is enough to recover
+every pair Stage 2 was reaching for: across all seven bank samples Stage 2 now fires
+zero times. It remains as a backstop for semantic linkage string comparison cannot
+reach — treat it as rarely-firing, not as the engine.
+
+The nine tabs are Summary, Matched, Review - Amount, Review - Date, Review - Weak
+Evidence, AI Matched, Unmatched - Bank, Unmatched - Ledger and Anomalies. They are
+organised by the kind of attention a row needs rather than by which stage produced
+it: "the two sides disagree about the money" and "nothing but the figures ties this
+pair together" are different problems for a reviewer, even though one stage emitted
+both.
 
 Stages 2 and 3 are deliberately kept separate: a missed match wastes a CA's time, a
 missed anomaly hides risk. The CA review queue splits into "couldn't match" and
@@ -202,7 +253,14 @@ transport, so no llama.cpp server or API key is required to run it.
 Per the spec, PDF extraction is built and validated one bank at a time rather than as
 a generic parser. To add one: create a class in `app/ingestion/bank_templates/`
 implementing `build_prompt()` and `parse_response()` (copy `hdfc.py`), then register
-it in `_BANK_TEMPLATES` in `app/main.py`. It appears in the UI dropdown automatically.
+it in `_BANK_TEMPLATES` in `app/main.py`, and add a label for it to `TEMPLATE_LABELS`
+in `app/static/index.html`. It then appears in the UI dropdown.
+
+Most banks also need a narration parser beside the template (`hdfc_narration.py` and
+friends), because the identifier that actually matches the ledger is often buried in
+the narration while the reference column holds a placeholder. Return the shared
+`ParsedNarration` from `bank_templates/base.py` so every bank exposes `kind`,
+`reference` and `counterparty` the same way.
 
 ## Landing page: "Book a demo"
 

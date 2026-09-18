@@ -23,11 +23,18 @@ def match_near(
     match_result: MatchResult,
     *,
     date_tolerance_days: int = 7,
-    # Measured, not guessed: on the sample statements the one genuine near-amount
-    # pair scores 0.44 while every spurious pairing among the leftovers scores
-    # 0.22-0.24, so anything from about 0.30 to 0.44 separates them with margin
-    # either side. 0.35 sits in the middle of that gap rather than on its edge — an
-    # earlier 0.45 missed the real pair by a hundredth.
+    # Measured, not guessed. Scoring on distinctive tokens rather than on raw
+    # characters widened the gap this threshold sits in: on the sample statements the
+    # genuine near-amount pair now scores 0.50, while spurious pairings among the
+    # leftovers share no identifying word at all and score 0.00. 0.35 sits well
+    # inside that gap.
+    #
+    # The history is worth keeping, because it is an argument against tuning this
+    # number again. Under character similarity the same genuine pair scored 0.3488
+    # and spurious ones 0.22-0.24, leaving almost no room: 0.45 missed the real pair,
+    # 0.35 missed it too once a ledger abbreviated the payee, and each miss dropped a
+    # correct match through to Stage 2 and left its fee in UNEXPLAINED. The fix was
+    # never a better threshold — it was comparing the right thing.
     similarity_threshold: float = 0.35,
 ) -> MatchResult:
     """Stage 1.5: deterministic recovery of pairs Stage 1 was too strict to see.

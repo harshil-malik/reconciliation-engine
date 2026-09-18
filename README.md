@@ -16,6 +16,8 @@ rather than guessed at by a generic parser.
 
 ## See it work
 
+![Reconciling an HDFC statement against a ledger: two PDFs in, UNEXPLAINED 0.00 out](docs/demo.gif)
+
 **Two minutes, and no model download.** The whole walkthrough below runs with no
 llama.cpp server started — verified, not assumed: with both model URLs pointed at
 dead ports the HDFC sample still reconciles to `UNEXPLAINED 0.00` with all 14 pairs

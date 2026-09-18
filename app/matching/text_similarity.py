@@ -43,6 +43,48 @@ def distinctive_tokens(text: str) -> set[str]:
     return {w for w in words if len(w) > 2 and w not in _BOILERPLATE}
 
 
+# Below this length a shared prefix means nothing: "ele" opens "Electricals" and
+# "Electronics" alike, and three characters of agreement is not evidence about who
+# was paid.
+_MIN_PREFIX_TOKEN_LENGTH = 4
+
+
+def tokens_correspond(a: str, b: str) -> bool:
+    """Do these two words name the same thing, allowing for truncation?
+
+    Bank statements abbreviate where ledgers spell out ("MAHESH ELEC" against
+    "Mahesh Electricals"), so a token that opens one on the other side counts.
+    """
+    if a == b:
+        return True
+    if min(len(a), len(b)) < _MIN_PREFIX_TOKEN_LENGTH:
+        return False
+    return a.startswith(b) or b.startswith(a)
+
+
+def token_similarity(a: str, b: str) -> float:
+    """How much of what each narration says about its counterparty is shared.
+
+    Scored over `distinctive_tokens` rather than raw characters, which is what makes
+    it disagree with `description_similarity` in both directions and in the right
+    one each time. A bank narration carries routing scaffolding the ledger never has
+    ("RTGS DR-BARB0000890-...-RTG3300"), and character similarity reads that padding
+    as disagreement; conversely two unrelated firms score highly on shared "to"/
+    "Ltd" boilerplate, which `distinctive_tokens` has already removed.
+
+    Dice rather than a raw hit count, so a long narration cannot corroborate a short
+    one merely by containing many words: both sides must be substantially about the
+    same party.
+    """
+    a_tokens = distinctive_tokens(a)
+    b_tokens = distinctive_tokens(b)
+    if not a_tokens or not b_tokens:
+        return 0.0
+    a_hits = sum(1 for x in a_tokens if any(tokens_correspond(x, y) for y in b_tokens))
+    b_hits = sum(1 for y in b_tokens if any(tokens_correspond(x, y) for x in a_tokens))
+    return (a_hits + b_hits) / (len(a_tokens) + len(b_tokens))
+
+
 def descriptions_corroborate(bank_txn: Transaction, ledger_txn: Transaction) -> bool:
     """Do these two narrations name anything in common?
 
@@ -53,15 +95,8 @@ def descriptions_corroborate(bank_txn: Transaction, ledger_txn: Transaction) -> 
     ledger_tokens = distinctive_tokens(ledger_txn.description)
     if not bank_tokens or not ledger_tokens:
         return False
-    if bank_tokens & ledger_tokens:
-        return True
-    # Bank statements truncate ("MAHESH ELEC" for "Mahesh Electricals"), so also
-    # accept a token that is a prefix of one on the other side.
     return any(
-        a.startswith(b) or b.startswith(a)
-        for a in bank_tokens
-        for b in ledger_tokens
-        if min(len(a), len(b)) >= 4
+        tokens_correspond(a, b) for a in bank_tokens for b in ledger_tokens
     )
 
 
@@ -97,14 +132,34 @@ def references_match(bank_txn: Transaction, ledger_txn: Transaction) -> bool:
     return bool(bank_forms and ledger_forms and bank_forms & ledger_forms)
 
 
+# 1.0 is reserved for a matching identifier, which is certainty: the two rows carry
+# the same string because a bank wrote it on both. Narrations can agree on every
+# distinctive word and still describe two payments to one supplier in the same week,
+# so however well they correspond they stay just short of that.
+_MAX_NARRATION_CONFIDENCE = 0.99
+
+
 def candidate_similarity(bank_txn: Transaction, ledger_txn: Transaction) -> float:
     """Similarity used to disambiguate multiple same-amount/same-date candidates.
 
     A reference number (cheque no., UTR, voucher no.) is the strongest signal when
-    both sides have one — an exact match short-circuits to full confidence. Otherwise
-    falls back to fuzzy description/narration similarity.
+    both sides have one — an exact match short-circuits to full confidence.
+
+    Failing that, score on the words that identify the counterparty rather than on
+    raw characters. Character similarity answers "are these strings alike", which is
+    not the question: a bank narration is mostly routing scaffolding the ledger never
+    repeats, so a plainly correct pair reads as weak, while two unrelated firms read
+    as strong on shared boilerplate. Where neither side offers a distinctive word to
+    compare — an unnarrated row — fall back to characters, since a weak signal beats
+    none.
     """
     if bank_txn.reference and ledger_txn.reference:
         if _normalize_text(bank_txn.reference) == _normalize_text(ledger_txn.reference):
             return 1.0
-    return description_similarity(bank_txn.description, ledger_txn.description)
+    if distinctive_tokens(bank_txn.description) and distinctive_tokens(
+        ledger_txn.description
+    ):
+        score = token_similarity(bank_txn.description, ledger_txn.description)
+    else:
+        score = description_similarity(bank_txn.description, ledger_txn.description)
+    return min(score, _MAX_NARRATION_CONFIDENCE)

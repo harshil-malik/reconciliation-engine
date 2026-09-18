@@ -31,8 +31,14 @@ from app.ai_matching.models import AIMatchResult
 from app.anomaly.config import AnomalyConfig
 from app.anomaly.detector import detect_anomalies
 from app.anomaly.models import AnomalyResult
+from app.ingestion.bank_templates.axis import AxisBankTemplate
 from app.ingestion.bank_templates.base import BankPDFTemplate
+from app.ingestion.bank_templates.bob import BankOfBarodaTemplate
 from app.ingestion.bank_templates.hdfc import HDFCBankTemplate
+from app.ingestion.bank_templates.icici import ICICIBankTemplate
+from app.ingestion.bank_templates.kotak import KotakBankTemplate
+from app.ingestion.bank_templates.pnb import PNBBankTemplate
+from app.ingestion.bank_templates.sbi import SBIBankTemplate
 from app.ingestion.csv_parser import parse_csv
 from app.ingestion.excel_parser import parse_excel
 from app.ingestion.ledger_convention import choose_ledger_convention
@@ -69,7 +75,15 @@ app = FastAPI(title="Reconciliation Engine")
 # One entry per bank template built and validated so far (spec: add banks one at a
 # time, not a generic parser). Separate from ledger templates because a bank
 # statement's layout has nothing in common with a ledger export's layout.
-_BANK_TEMPLATES: dict[str, BankPDFTemplate] = {"hdfc": HDFCBankTemplate()}
+_BANK_TEMPLATES: dict[str, BankPDFTemplate] = {
+    "hdfc": HDFCBankTemplate(),
+    "sbi": SBIBankTemplate(),
+    "icici": ICICIBankTemplate(),
+    "pnb": PNBBankTemplate(),
+    "bob": BankOfBarodaTemplate(),
+    "axis": AxisBankTemplate(),
+    "kotak": KotakBankTemplate(),
+}
 # Two ledger templates because the Debit/Credit convention differs by which account
 # the ledger covers, and picking the wrong one inverts every amount in the file
 # without failing loudly. "bank_account_ledger" is listed first as it is the usual

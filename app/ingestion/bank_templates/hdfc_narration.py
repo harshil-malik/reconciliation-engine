@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from app.ingestion.bank_templates.base import ParsedNarration
+
 # HDFC packs the real transaction identifier into the narration and prints
 # "0000000000" in the Chq./Ref.No. column — on the statement this was built from,
 # 11 of 18 rows carried a reference the ledger also holds, while only 5 matched
@@ -30,29 +32,6 @@ _INTEREST = re.compile(r"^INT\.?\s*(?:PD|CR)\b", re.I)
 
 # Identifiers shorter than this are too generic to be worth matching on.
 _MIN_REFERENCE_LENGTH = 5
-
-
-class ParsedNarration:
-    """A narration broken into the parts that matter for reconciliation.
-
-    `kind` says what the bank did (upi, neft, rtgs, imps, nach, cheque, charge,
-    interest), `reference` is the transaction id, and `counterparty` is who the
-    money moved to or from — matching against that is far sharper than against the
-    whole narration, which is mostly routing noise.
-    """
-
-    __slots__ = ("kind", "reference", "counterparty")
-
-    def __init__(self, kind: str | None, reference: str | None, counterparty: str | None):
-        self.kind = kind
-        self.reference = reference
-        self.counterparty = counterparty
-
-    def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return (
-            f"ParsedNarration(kind={self.kind!r}, reference={self.reference!r}, "
-            f"counterparty={self.counterparty!r})"
-        )
 
 
 def parse_narration(description: str) -> ParsedNarration:

@@ -21,6 +21,31 @@ def parse_json_rows(response_text: str) -> list[dict]:
     return json.loads(match.group(0))
 
 
+class ParsedNarration:
+    """A narration broken into the parts that matter for reconciliation.
+
+    Shared by every bank's narration parser (hdfc_narration.py and friends) so each
+    one only has to define its own regexes, not re-declare this container. `kind`
+    says what the bank did (upi, neft, rtgs, imps, cheque, salary, atm, charge, ...),
+    `reference` is the transaction id, and `counterparty` is who the money moved to
+    or from — matching against that is far sharper than against the whole narration,
+    which is mostly routing noise.
+    """
+
+    __slots__ = ("kind", "reference", "counterparty")
+
+    def __init__(self, kind: str | None, reference: str | None, counterparty: str | None):
+        self.kind = kind
+        self.reference = reference
+        self.counterparty = counterparty
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"ParsedNarration(kind={self.kind!r}, reference={self.reference!r}, "
+            f"counterparty={self.counterparty!r})"
+        )
+
+
 class BankPDFTemplate(Protocol):
     """Per-source PDF extraction template (a bank statement layout, or a ledger
     export layout).
